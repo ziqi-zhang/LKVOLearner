@@ -20,6 +20,9 @@ from timeit import default_timer as timer
 # data_root_path = '/newfoundland/chaoyang/SfMLearner/data_kitti'
 
 from pdb import set_trace
+from util.logger import Logger
+from util.util import *
+from PIL import Image
 
 
 
@@ -29,6 +32,7 @@ def vis_depthmap(input):
 
 def main():
     opt = TrainOptions().parse()
+    logger = Logger(opt.tf_log_dir)
     img_size = [opt.imH, opt.imW]
 
     # visualizer = Visualizer(opt)
@@ -96,6 +100,9 @@ def main():
                 #             OrderedDict([('photometric_cost', photometric_cost.data.cpu()[0]),
                 #              ('smoothness_cost', smoothness_cost.data.cpu()[0]),
                 #              ('cost', cost.data.cpu()[0])]))
+                logger.add_scalar('train/photo', photometric_cost.data.cpu()[0], step_num)
+                logger.add_scalar('train/smooth',smoothness_cost.data.cpu()[0], step_num)
+                logger.add_scalar('train/cost', cost.data.cpu()[0], step_num)
 
             if np.mod(step_num, opt.display_freq)==0:
                 # frame_vis = frames.data[:,1,:,:,:].permute(0,2,3,1).contiguous().view(-1,opt.imW, 3).cpu().numpy().astype(np.uint8)
@@ -108,9 +115,11 @@ def main():
                 #                 OrderedDict([('%s frame' % (opt.name), frame_vis),
                 #                         ('%s inv_depth' % (opt.name), depth_vis)]),
                 #                         epoch)
-                sio.savemat(os.path.join(opt.checkpoints_dir, 'depth_%s.mat' % (step_num)),
-                    {'D': inv_depths.data.cpu().numpy(),
-                     'I': frame_vis})
+                result_vis = np.hstack([frame_vis, depth_vis])
+                save_image(result_vis, os.path.join(opt.vis_dir, 'depth_%s.png'%step_num))
+                # sio.savemat(os.path.join(opt.checkpoints_dir, 'depth_%s.mat' % (step_num)),
+                #     {'D': inv_depths.data.cpu().numpy(),
+                #      'I': frame_vis})
 
             if np.mod(step_num, opt.save_latest_freq)==0:
                 print("cache model....")

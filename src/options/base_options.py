@@ -53,6 +53,10 @@ class BaseOptions():
         print('-------------- End ----------------')
 
         # save to the disk
+        self.opt.vis_dir = os.path.join(self.opt.checkpoints_dir, 'vis')
+        util.mkdir(self.opt.vis_dir)
+        self.opt.tf_log_dir = os.path.join(self.opt.checkpoints_dir, 'tensorboard')
+        util.mkdir(self.opt.tf_log_dir)
         expr_dir = os.path.join(self.opt.checkpoints_dir, self.opt.name)
         util.mkdirs(expr_dir)
         file_name = os.path.join(expr_dir, 'opt.txt')
