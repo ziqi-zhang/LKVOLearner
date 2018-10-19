@@ -19,7 +19,7 @@ class KITTIdataset(Dataset):
                 seq_path, frame_name = frame_path.split(" ")
                 frame_path = os.path.join(seq_path, frame_name)
                 self.frame_pathes.append(frame_path)
-                print(frame_path)
+                # print(frame_path)
         # self.frame_pathes = self.frame_pathes[0:40000:800]
 
     def __len__(self):
