@@ -23,9 +23,6 @@ from pdb import set_trace
 from util.logger import Logger
 from util.util import *
 from PIL import Image
-from torch.utils.data.distributed import DistributedSampler
-import torch.distributed as dist
-from torchE.D import dist_init, average_gradients, DistModule
 
 
 
@@ -35,11 +32,6 @@ def vis_depthmap(input):
 
 def main():
     opt = TrainOptions().parse()
-    if opt.dist:
-        assert torch.cuda.device_count() > 1
-        rank, world_size = dist_init(opt.port)
-    else:
-        assert torch.cuda.device_count() == 1
     logger = Logger(opt.tf_log_dir)
 
     img_size = [opt.imH, opt.imW]
@@ -47,11 +39,9 @@ def main():
     # visualizer = Visualizer(opt)
 
     dataset = KITTIdataset(data_root_path=opt.dataroot, img_size=img_size, bundle_size=3)
-    sampler = DistributedSampler(dataset)
     # dataset = KCSdataset(img_size=img_size, bundle_size=3)
     dataloader = DataLoader(dataset, batch_size=opt.batchSize,
-                            shuffle=False, num_workers=opt.nThreads, pin_memory=True,
-                            sampler=sampler)
+                            shuffle=True, num_workers=opt.nThreads, pin_memory=True)
 
     gpu_ids = list(range(opt.batchSize))
 
@@ -69,9 +59,6 @@ def main():
 
 
     sfmlearner.cuda()
-    if opt.dist:
-        sfmlearner.sfmkernel.depth_net = DistModule(sfmlearner.sfmkernel.depth_net)
-        sfmlearner.sfmkernel.pose_net = DistModule(sfmlearner.sfmkernel.pose_net)
 
 
     ref_frame_idx = 1
@@ -83,8 +70,6 @@ def main():
 
 
     for epoch in range(max(0, opt.which_epoch), opt.epoch_num+1):
-        sfmlearner.sfmkernel.depth_net.train()
-        sfmlearner.sfmkernel.pose_net.train()
         t = timer()
         for ii, data in enumerate(dataloader):
             optimizer.zero_grad()
@@ -100,32 +85,10 @@ def main():
             #     # lkvolearner.save_model(os.path.join(opt.checkpoints_dir, '%s_model.pth' % (epoch)))
             #     print("detect nan or inf-----!!!!! %f" %(inv_depths_mean))
             #     continue
-            if opt.dist:
-                print_cost = cost.data.clone()/world_size
-                print_photo = photometric_cost.data.clone()/world_size
-                print_smooth = smoothness_cost.data.clone()/world_size
-                dist.all_reduce(print_cost)
-                dist.all_reduce(print_photo)
-                dist.all_reduce(print_smooth)
-                print_cost = print_cost[0]
-                print_photo = print_photo[0]
-                print_smooth = print_smooth[0]
 
-            else:
-                print_cost = cost.data.clone()
-                print_photo = photometric_cost.data.clone()
-                print_smooth = smoothness_cost.data.clone()
-
-            set_trace()
             # print(cost)
             # print(inv_depth_pyramid)
-            optimizer.zero_grad()
             cost.backward()
-            param = sfmlearner.get_parameters()
-            if opt.dist:
-
-                average_gradients(sfmlearner.sfmkernel.depth_net)
-                average_gradients(sfmlearner.sfmkernel.pose_net)
             optimizer.step()
 
             step_num+=1
@@ -157,8 +120,8 @@ def main():
                 #                 OrderedDict([('%s frame' % (opt.name), frame_vis),
                 #                         ('%s inv_depth' % (opt.name), depth_vis)]),
                 #                         epoch)
-                result_vis = np.hstack([frame_vis, depth_vis])
-                save_image(result_vis, os.path.join(opt.vis_dir, 'depth_%s.png'%step_num))
+                # result_vis = np.hstack([frame_vis, depth_vis])
+                # save_image(result_vis, os.path.join(opt.vis_dir, 'depth_%s.png'%step_num))
                 # sio.savemat(os.path.join(opt.checkpoints_dir, 'depth_%s.mat' % (step_num)),
                 #     {'D': inv_depths.data.cpu().numpy(),
                 #      'I': frame_vis})

@@ -7,6 +7,25 @@ from PIL import Image
 import numpy as np
 import matplotlib.pyplot as plt
 import argparse
+from pdb import set_trace
+
+def colored_depthmap(depth, d_min=None, d_max=None):
+    import matplotlib.pyplot as plt
+    cmap = plt.cm.viridis
+
+    if d_min is None:
+        d_min = np.min(depth)
+    if d_max is None:
+        d_max = np.max(depth)
+    depth_relative = (depth - d_min) / (d_max - d_min)
+    return (255 * cmap(depth_relative)[:,:,:3]).astype(np.uint8) # H, W, C
+
+def filepath_to_filename(filepath):
+    items = filepath.split('/')
+    filename = items[0]
+    for item in items[1:]:
+        filename = filename+'.'+item
+    return filename
 
 """
 CUDA_VISIBLE_DEVICES=1 nice -10 python3 testKITTI.py --dataset_root /newfoundland/chaoyang/kitti --ckpt_file /home/chaoyang/LKVOLearner/checkpoints/checkpoints_19_416_scratch/9_model.pth --test_file_list
@@ -17,6 +36,7 @@ parser.add_argument("--dataset_root", type=str, default="/newfoundland/chaoyang/
 parser.add_argument("--test_file_list", type=str, default="/newfoundland/chaoyang/SfMLearner/data/kitti/test_files_eigen.txt", help="test file list")
 parser.add_argument("--ckpt_file", type=str, default=None, help="checkpoint file")
 parser.add_argument("--output_path", type=str, default="pred_depths", help="output path")
+parser.add_argument("--vis_dir", type=str, default=None)
 parser.add_argument("--use_pp", default=False, action="store_true", help='use post processing')
 
 FLAGS = parser.parse_args()
@@ -47,7 +67,7 @@ test_files = read_text_lines(test_file_list)
 pred_depths = []
 i = 0
 for filename in test_files:
-    print(i)
+    # print(i)
     filename = filename.split()[0]
     im_path = os.path.join(dataset_root, filename)
     img_pil = Image.open(im_path).resize((img_size[1], img_size[0]), Image.ANTIALIAS)
@@ -56,7 +76,7 @@ for filename in test_files:
     # print(img.shape)
     img = img.transpose(2, 0, 1)
     # print(img.shape)
-    print(filename)
+    # print(filename)
     img_var = Variable(torch.from_numpy(img).float().cuda(), volatile=True)
 
 
@@ -65,21 +85,30 @@ for filename in test_files:
         img_vars = (torch.cat((fliplr(img_var).unsqueeze(0), img_var.unsqueeze(0)), 0)-127)/127
         pred_depth_pyramid = vgg_depth_net.forward(img_vars)
         depth = pred_depth_pyramid[0]
-        print(depth.size())
+        # print(depth.size())
         depth_mean = (fliplr(depth[0:1, :, :]) + depth[1:2, :, :])*.5
-        pred_depths.append(depth_mean.data.cpu().squeeze().numpy())
+        depth_mean = depth_mean.data.cpu().squeeze().numpy()
+        pred_depths.append(depth_mean)
         # compute mean
     else:
         pred_depth_pyramid = vgg_depth_net.forward((img_var.unsqueeze(0)-127)/127)
         pred_depths.append(pred_depth_pyramid[0].data.cpu().squeeze().numpy())
+    if FLAGS.vis_dir is not None:
+        depth_vis = colored_depthmap(pred_depths[-1])
+        vis_img = np.hstack([img_pil, depth_vis])
+        vis_file_name = filepath_to_filename(filename)
+        vis_file_path = os.path.join(FLAGS.vis_dir, vis_file_name)
+        Image.fromarray(vis_img).save(vis_file_path)
+
+    # set_trace()
     i = i+1
     # if i==3:
     #     break
 pred_depths = np.asarray(pred_depths)
 print(pred_depths.shape)
 np.save(output_path, 1/pred_depths)
-import scipy.io as sio
-sio.savemat(output_path, {'D': pred_depths})
+# import scipy.io as sio
+# sio.savemat(output_path, {'D': pred_depths})
     # print(pred_depth_pyramid[0].size())
     # plt.imshow(pred_depth_pyramid[0].data.cpu().squeeze().numpy())
     # plt.show()
