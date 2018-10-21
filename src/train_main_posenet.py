@@ -98,6 +98,9 @@ def main():
                 print('epoch %s[%s/%s], ... elapsed time: %f (s)' % (epoch, step_num, int(len(dataset)/opt.batchSize), elapsed_time))
                 print(inv_depths_mean)
                 t = timer()
+                print_photo = photometric_cost.data.cpu()[0]
+                print_smooth = smoothness_cost.data.cpu()[0]
+                print_cost = cost.data.cpu()[0]
                 print("Print: photometric_cost {:.3f}, smoothness_cost {:.3f}, cost {:.3f}".format(print_photo,
                         print_smooth, print_cost))
 
