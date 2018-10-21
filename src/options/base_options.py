@@ -26,7 +26,8 @@ class BaseOptions():
         self.parser.add_argument('--display_port', type=int, default=8097, help='visdom port of the web display')
         self.parser.add_argument('--display_single_pane_ncols', type=int, default=0, help='if positive, display all images in a single visdom web panel with certain number of images per row.')
 
-
+        self.parser.add_argument('--dist', default=False, action='store_true')
+        self.parser.add_argument('--port', default='23461')
 
     def parse(self):
         if not self.initialized:

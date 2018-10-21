@@ -23,6 +23,9 @@ from pdb import set_trace
 from util.logger import Logger
 from util.util import *
 from PIL import Image
+from torch.utils.data.distributed import DistributedSampler
+import torch.distributed as dist
+from torchE.D import dist_init, average_gradients, DistModule
 
 
 
@@ -32,20 +35,28 @@ def vis_depthmap(input):
 
 def main():
     opt = TrainOptions().parse()
+    if opt.dist:
+        assert torch.cuda.device_count() > 1
+        rank, world_size = dist_init(opt.port)
+    else:
+        assert torch.cuda.device_count() == 1
     logger = Logger(opt.tf_log_dir)
+
     img_size = [opt.imH, opt.imW]
 
     # visualizer = Visualizer(opt)
 
     dataset = KITTIdataset(data_root_path=opt.dataroot, img_size=img_size, bundle_size=3)
+    sampler = DistributedSampler(dataset)
     # dataset = KCSdataset(img_size=img_size, bundle_size=3)
     dataloader = DataLoader(dataset, batch_size=opt.batchSize,
-                            shuffle=True, num_workers=opt.nThreads, pin_memory=True)
+                            shuffle=False, num_workers=opt.nThreads, pin_memory=True,
+                            sampler=sampler)
 
     gpu_ids = list(range(opt.batchSize))
 
 
-    sfmlearner = SfMLearner(img_size=img_size, ref_frame_idx=1, lambda_S=opt.lambda_S, gpu_ids = gpu_ids, smooth_term = opt.smooth_term, use_ssim=opt.use_ssim)
+    sfmlearner = SfMLearner(img_size=img_size, ref_frame_idx=1, lambda_S=opt.lambda_S, smooth_term = opt.smooth_term, use_ssim=opt.use_ssim)
     sfmlearner.init_weights()
 
 
@@ -53,19 +64,27 @@ def main():
         print("load pretrained model")
         sfmlearner.load_model(os.path.join(opt.checkpoints_dir, '%s' % (opt.which_epoch)))
 
+    optimizer = optim.Adam(sfmlearner.get_parameters(), lr=.0001)
+
+
+
     sfmlearner.cuda()
+    if opt.dist:
+        sfmlearner.sfmkernel.depth_net = DistModule(sfmlearner.sfmkernel.depth_net)
+        sfmlearner.sfmkernel.pose_net = DistModule(sfmlearner.sfmkernel.pose_net)
+
 
     ref_frame_idx = 1
 
 
-
-    optimizer = optim.Adam(sfmlearner.get_parameters(), lr=.0001)
 
     step_num = 0
 
 
 
     for epoch in range(max(0, opt.which_epoch), opt.epoch_num+1):
+        sfmlearner.sfmkernel.depth_net.train()
+        sfmlearner.sfmkernel.pose_net.train()
         t = timer()
         for ii, data in enumerate(dataloader):
             optimizer.zero_grad()
@@ -81,10 +100,32 @@ def main():
             #     # lkvolearner.save_model(os.path.join(opt.checkpoints_dir, '%s_model.pth' % (epoch)))
             #     print("detect nan or inf-----!!!!! %f" %(inv_depths_mean))
             #     continue
+            if opt.dist:
+                print_cost = cost.data.clone()/world_size
+                print_photo = photometric_cost.data.clone()/world_size
+                print_smooth = smoothness_cost.data.clone()/world_size
+                dist.all_reduce(print_cost)
+                dist.all_reduce(print_photo)
+                dist.all_reduce(print_smooth)
+                print_cost = print_cost[0]
+                print_photo = print_photo[0]
+                print_smooth = print_smooth[0]
 
+            else:
+                print_cost = cost.data.clone()
+                print_photo = photometric_cost.data.clone()
+                print_smooth = smoothness_cost.data.clone()
+
+            set_trace()
             # print(cost)
             # print(inv_depth_pyramid)
+            optimizer.zero_grad()
             cost.backward()
+            param = sfmlearner.get_parameters()
+            if opt.dist:
+
+                average_gradients(sfmlearner.sfmkernel.depth_net)
+                average_gradients(sfmlearner.sfmkernel.pose_net)
             optimizer.step()
 
             step_num+=1
@@ -94,23 +135,24 @@ def main():
                 print('epoch %s[%s/%s], ... elapsed time: %f (s)' % (epoch, step_num, int(len(dataset)/opt.batchSize), elapsed_time))
                 print(inv_depths_mean)
                 t = timer()
-                print("Print: photometric_cost {:.3f}, smoothness_cost {:.3f}, cost {:.3f}".format(photometric_cost.data.cpu()[0],
-                        smoothness_cost.data.cpu()[0], cost.data.cpu()[0]))
+                print("Print: photometric_cost {:.3f}, smoothness_cost {:.3f}, cost {:.3f}".format(print_photo,
+                        print_smooth, print_cost))
+
                 # visualizer.plot_current_errors(step_num, 1, opt,
                 #             OrderedDict([('photometric_cost', photometric_cost.data.cpu()[0]),
                 #              ('smoothness_cost', smoothness_cost.data.cpu()[0]),
                 #              ('cost', cost.data.cpu()[0])]))
-                logger.add_scalar('train/photo', photometric_cost.data.cpu()[0], step_num)
-                logger.add_scalar('train/smooth',smoothness_cost.data.cpu()[0], step_num)
-                logger.add_scalar('train/cost', cost.data.cpu()[0], step_num)
+                logger.add_scalar('train/photo', print_photo, step_num)
+                logger.add_scalar('train/smooth',print_smooth, step_num)
+                logger.add_scalar('train/cost', print_cost, step_num)
 
             if np.mod(step_num, opt.display_freq)==0:
                 # frame_vis = frames.data[:,1,:,:,:].permute(0,2,3,1).contiguous().view(-1,opt.imW, 3).cpu().numpy().astype(np.uint8)
                 # depth_vis = vis_depthmap(inv_depths.data[:,1,:,:].contiguous().view(-1,opt.imW).cpu()).numpy().astype(np.uint8)
                 frame_vis = frames.data.permute(1,2,0).contiguous().cpu().numpy().astype(np.uint8)
                 depth_vis = vis_depthmap(inv_depths.data.cpu()).numpy().astype(np.uint8)
-                print("Display: photometric_cost {:.3f}, smoothness_cost {:.3f}, cost {:.3f}".format(photometric_cost.data.cpu()[0],
-                        smoothness_cost.data.cpu()[0], cost.data.cpu()[0]))
+                # print("Display: photometric_cost {:.3f}, smoothness_cost {:.3f}, cost {:.3f}".format(photometric_cost.data.cpu()[0],
+                #         smoothness_cost.data.cpu()[0], cost.data.cpu()[0]))
                 # visualizer.display_current_results(
                 #                 OrderedDict([('%s frame' % (opt.name), frame_vis),
                 #                         ('%s inv_depth' % (opt.name), depth_vis)]),

@@ -5,6 +5,7 @@ import functools
 from torch.autograd import Variable
 import numpy as np
 
+from pdb import set_trace
 
 DISP_SCALING = 10
 MIN_DISP = 0.01
@@ -291,6 +292,7 @@ if __name__ == "__main__":
 
 
     dnet = VggDepthEstimator([128,416]).cuda()
+    set_trace()
     I = Variable(torch.randn(1,3,128,416).cuda())
     invdepth_pyramid = dnet.forward(I)
     for i in range(len(invdepth_pyramid)):

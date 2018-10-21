@@ -10,6 +10,9 @@ import itertools
 
 from timeit import default_timer as timer
 
+from pdb import set_trace
+from torchE.D import DistModule
+
 class FlipLR(nn.Module):
     def __init__(self, imW, dim_w):
         super(FlipLR, self).__init__()
@@ -26,10 +29,11 @@ class FlipLR(nn.Module):
 class SfMLearner(nn.Module):
     def __init__(self, img_size=[128, 416], ref_frame_idx=1,
         lambda_S=.5, lambda_E=0.01, use_ssim=True, smooth_term = 'lap',
-        use_expl_mask=False, gpu_ids=[0]):
+        use_expl_mask=False):
         super(SfMLearner, self).__init__()
-        self.sfmkernel = nn.DataParallel(SfMKernel(img_size, smooth_term = smooth_term, use_expl_mask=use_expl_mask),
-                            device_ids=gpu_ids)
+        # self.sfmkernel = nn.DataParallel(SfMKernel(img_size, smooth_term = smooth_term, use_expl_mask=use_expl_mask),
+        #                     device_ids=gpu_ids)
+        self.sfmkernel = SfMKernel(img_size, smooth_term = smooth_term, use_expl_mask=use_expl_mask)
         self.ref_frame_idx = ref_frame_idx
         self.lambda_S = lambda_S
         self.lambda_E = lambda_E
@@ -43,22 +47,21 @@ class SfMLearner(nn.Module):
         return cost.mean(), photometric_cost.mean(), smoothness_cost.mean(), ref_frame, ref_inv_depth, ref_expl_mask
 
     def save_model(self, file_path):
-        torch.save(self.cpu().sfmkernel.module.depth_net.state_dict(),
+        torch.save(self.cpu().sfmkernel.depth_net.state_dict(),
             file_path+'_depth_net.pth')
-        torch.save(self.sfmkernel.module.pose_net.state_dict(),
+        torch.save(self.sfmkernel.pose_net.state_dict(),
             file_path+'_pose_net.pth')
         self.cuda()
 
     def load_model(self, file_path):
-        self.sfmkernel.module.depth_net.load_state_dict(torch.load(file_path+'_depth_net.pth'))
-        self.sfmkernel.module.pose_net.load_state_dict(torch.load(file_path+'_pose_net.pth'))
+        self.sfmkernel.depth_net.load_state_dict(torch.load(file_path+'_depth_net.pth'))
+        self.sfmkernel.pose_net.load_state_dict(torch.load(file_path+'_pose_net.pth'))
 
     def init_weights(self):
-        self.sfmkernel.module.depth_net.init_weights()
+        self.sfmkernel.depth_net.init_weights()
 
     def get_parameters(self):
-        return itertools.chain(self.sfmkernel.module.depth_net.parameters(),
-                    self.sfmkernel.module.pose_net.parameters())
+        return list(self.sfmkernel.depth_net.parameters()) + list(self.sfmkernel.pose_net.parameters())
 
 
 
@@ -147,5 +150,5 @@ class SfMKernel(nn.Module):
                             + self.vo.multi_scale_image_aware_smoothness_cost(inv_depth_norm_pyramid, frames_pyramid, levels=[2,3], type=self.smooth_term)
 
         cost = photometric_cost + lambda_S*smoothness_cost - lambda_E*expl_mask_reg_cost
-        
+
         return cost, photometric_cost, smoothness_cost, ref_frame_pyramid[0], ref_inv_depth_pyramid[0]*inv_depth_mean_ten, expl_mask
