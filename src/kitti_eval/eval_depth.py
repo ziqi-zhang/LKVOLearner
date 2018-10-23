@@ -41,6 +41,13 @@ def convert_disps_to_depths_stereo(gt_disparities, pred_depths):
     return gt_depths, pred_depths_resized, pred_disparities_resized
 
 def main():
+    evaluate_kitti(split=args.split, kitti_dir=args.kitti_dir,
+                    test_file_list=args.test_file_list,
+                    pred_file=args.pred_file, min_depth=args.min_depth,
+                    max_depth=args.max_depth)
+
+def evaluate_kitti(split, kitti_dir, test_file_list, pred_file,
+                    min_depth, max_depth):
 
     pred_depths = np.load(args.pred_file)
     # args.test_file_list = './data/kitti/test_files_%s.txt' % args.split
@@ -119,5 +126,7 @@ def main():
 
     print("{:>10}, {:>10}, {:>10}, {:>10}, {:>10}, {:>10}, {:>10}, {:>10}".format('abs_rel', 'sq_rel', 'rms', 'log_rms', 'd1_all', 'a1', 'a2', 'a3'))
     print("{:10.4f}, {:10.4f}, {:10.4f}, {:10.4f}, {:10.4f}, {:10.4f}, {:10.4f}, {:10.4f}".format(abs_rel.mean(), sq_rel.mean(), rms.mean(), log_rms.mean(), d1_all.mean(), a1.mean(), a2.mean(), a3.mean()))
+    print()
+    return abs_rel.mean(), sq_rel.mean(), rms.mean(), log_rms.mean(), d1_all.mean(), a1.mean(), a2.mean(), a3.mean()
 
 main()
