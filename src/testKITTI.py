@@ -67,7 +67,7 @@ test_files = read_text_lines(test_file_list)
 pred_depths = []
 i = 0
 for filename in test_files:
-    # print(i)
+    print(i)
     filename = filename.split()[0]
     im_path = os.path.join(dataset_root, filename)
     img_pil = Image.open(im_path).resize((img_size[1], img_size[0]), Image.ANTIALIAS)
