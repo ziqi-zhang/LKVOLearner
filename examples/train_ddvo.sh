@@ -1,4 +1,3 @@
-source activate r0.1.0
 
 MODEL_ID=9
 PWD=$(pwd)
