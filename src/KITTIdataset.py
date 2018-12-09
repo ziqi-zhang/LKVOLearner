@@ -35,7 +35,7 @@ class KITTIdataset(Dataset):
             cam_intrinsics = [float(x) for x in next(file).split(',')]
         # camparams = dict(fx=cam_intrinsics[0], cx=cam_intrinsics[2],
         #             fy=cam_intrinsics[4], cy=cam_intrinsics[5])
-        camparams = np.asarray(cam_intrinsics)
+        camparams = np.asarray(cam_intrinsics).astype(np.float32)
 
         # read image bundle
         img_file = os.path.join(self.data_root_path, self.frame_pathes[item]+'.jpg')
@@ -55,13 +55,13 @@ class KITTIdataset(Dataset):
         for src_idx in src_idxs:
             single_pair = kpts_dict[src_idx]
             # [src, ref]
-            single_pair = np.array([single_pair[src_idx], single_pair[ref_idx]]).astype(float)
+            single_pair = np.array([single_pair[src_idx], single_pair[ref_idx]]).astype(np.float32)
             if single_pair.shape[1]<self.min_kpts_num:
                 repeat_time = int(self.min_kpts_num/single_pair.shape[1])+1
                 single_pair = np.tile(single_pair, (1,repeat_time,1))
             kpts.append(single_pair[:,:self.min_kpts_num,:])
         kpts = np.array(kpts)
-
+        
         return frames, camparams, kpts
 
 if __name__ == "__main__":

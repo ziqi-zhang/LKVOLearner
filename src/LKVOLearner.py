@@ -23,17 +23,18 @@ class FlipLR(nn.Module):
 
 
 class LKVOLearner(nn.Module):
-    def __init__(self, img_size=[128, 416], ref_frame_idx=1, lambda_S=.5, use_ssim=True, smooth_term = 'lap', gpu_ids=[0]):
+    def __init__(self, img_size=[128, 416], ref_frame_idx=1, lambda_S=.5, lambda_K=1, use_ssim=True, smooth_term = 'lap', gpu_ids=[0]):
         super(LKVOLearner, self).__init__()
         self.lkvo = nn.DataParallel(LKVOKernel(img_size, smooth_term = smooth_term), device_ids=gpu_ids)
         self.ref_frame_idx = ref_frame_idx
         self.lambda_S = lambda_S
+        self.lambda_K = lambda_K
         self.use_ssim = use_ssim
 
-    def forward(self, frames, camparams, max_lk_iter_num=10):
-        cost, photometric_cost, smoothness_cost, ref_frame, ref_inv_depth \
-            = self.lkvo.forward(frames, camparams, self.ref_frame_idx, self.lambda_S, max_lk_iter_num=max_lk_iter_num, use_ssim=self.use_ssim)
-        return cost.mean(), photometric_cost.mean(), smoothness_cost.mean(), ref_frame, ref_inv_depth
+    def forward(self, frames, camparams, kpts, max_lk_iter_num=10):
+        cost, photometric_cost, smoothness_cost, kpts_cost, ref_frame, ref_inv_depth \
+            = self.lkvo.forward(frames, camparams, kpts, self.ref_frame_idx, self.lambda_S, self.lambda_K, max_lk_iter_num=max_lk_iter_num, use_ssim=self.use_ssim)
+        return cost.mean(), photometric_cost.mean(), smoothness_cost.mean(), kpts_cost.mean(), ref_frame, ref_inv_depth
 
     def save_model(self, file_path):
         torch.save(self.cpu().lkvo.module.depth_net.state_dict(),
@@ -64,11 +65,39 @@ class LKVOKernel(nn.Module):
         self.pyramid_func = ImagePyramidLayer(chan=1, pyramid_layer_num=5)
         self.smooth_term = smooth_term
 
+    def compute_kpts_diff(self, inv_depth_norm, kpts, trans_batch):
+        # only support 3 frames
+        kpt_num = kpts.shape[2]
+        inv_depth_norm = inv_depth_norm.unsqueeze(0)
+        inv_depth_batch = torch.cat((inv_depth_norm[:,0], inv_depth_norm[:,1], inv_depth_norm[:,2], inv_depth_norm[:,1]))
+        kpts = torch.reshape(kpts, (kpts.shape[0]*kpts.shape[1],-1,2))
+        kpts = kpts.long()
+        kpts_depth = []
+        for i in range(kpts.shape[0]):
 
-    def forward(self, frames, camparams, ref_frame_idx, lambda_S=.5, do_data_augment=True, use_ssim=True, max_lk_iter_num=10):
+            depth = inv_depth_batch[i]
+            kpt = kpts[i]
+            col_select = torch.index_select(depth, 1, kpt[:,0])
+            row_select = torch.index_select(col_select, 0, kpt[:,1])
+            kpt_depth = row_select.diag()
+            # st()
+            kpts_depth.append(kpt_depth)
+        kpts_depth = torch.stack(kpts_depth)
+        for i in range(trans_batch.shape[0]):
+            kpts_depth[i*2,:]-=trans_batch[i,2]
+        diff = []
+        for i in range(trans_batch.shape[0]):
+            diff.append((kpts_depth[i*2,:]-kpts_depth[i*2+1,:]).abs())
+        diff = torch.stack(diff)
+        diff_mean = diff.mean()
+
+        return diff_mean
+
+    def forward(self, frames, camparams, kpts, ref_frame_idx, lambda_S=.5, lambda_K=1, do_data_augment=True, use_ssim=True, max_lk_iter_num=10):
         assert(frames.size(0) == 1 and frames.dim() == 5)
         frames = frames.squeeze(0)
         camparams = camparams.squeeze(0).data
+        kpts = kpts.squeeze(0)
 
 
         if do_data_augment:
@@ -118,12 +147,15 @@ class LKVOKernel(nn.Module):
         smoothness_cost = self.vo.multi_scale_image_aware_smoothness_cost(inv_depth0_pyramid, frames_pyramid, levels=[2,3], type=self.smooth_term) \
                             + self.vo.multi_scale_image_aware_smoothness_cost(inv_depth_norm_pyramid, frames_pyramid, levels=[2,3], type=self.smooth_term)
 
+        kpts_cost = self.compute_kpts_diff(inv_depth_norm_pyramid[0], kpts, trans_batch)
+
         # photometric_cost0, reproj_cost0, _, _ = self.vo.compute_phtometric_loss(self.vo.ref_frame_pyramid, src_frames_pyramid, ref_inv_depth0_pyramid, src_inv_depth0_pyramid, rot_mat_batch, trans_batch)
 
 
         # cost = photometric_cost + photometric_cost0 + reproj_cost + reproj_cost0 + lambda_S*smoothness_cost
-        cost = photometric_cost + lambda_S*smoothness_cost
-        return cost, photometric_cost, smoothness_cost, self.vo.ref_frame_pyramid[0], ref_inv_depth0_pyramid[0]*inv_depth_mean_ten
+
+        cost = photometric_cost + lambda_S*smoothness_cost + lambda_K*kpts_cost
+        return cost, photometric_cost, smoothness_cost, kpts_cost, self.vo.ref_frame_pyramid[0], ref_inv_depth0_pyramid[0]*inv_depth_mean_ten
 
 
 if __name__  == "__main__":
