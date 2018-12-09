@@ -3,7 +3,7 @@ import numpy as np
 import scipy.io as sio
 from PIL import Image
 import os
-
+from pdb import set_trace as st
 
 class KITTIdataset(Dataset):
     """KITTIdataset"""

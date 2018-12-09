@@ -18,7 +18,7 @@ from util.visualizer import Visualizer
 from timeit import default_timer as timer
 # data_root_path = '/newfoundland/chaoyang/SfMLearner/data_kitti'
 
-from pdb import set_trace
+from pdb import set_trace as st
 from util.logger import Logger
 from util.util import *
 from PIL import Image
