@@ -32,9 +32,9 @@ class LKVOLearner(nn.Module):
         self.use_ssim = use_ssim
 
     def forward(self, frames, camparams, kpts, max_lk_iter_num=10):
-        cost, photometric_cost, smoothness_cost, kpts_cost, ref_frame, ref_inv_depth \
+        cost, photometric_cost, smoothness_cost, kpts_cost, ref_frame, ref_inv_depth, warp_img_save \
             = self.lkvo.forward(frames, camparams, kpts, self.ref_frame_idx, self.lambda_S, self.lambda_K, max_lk_iter_num=max_lk_iter_num, use_ssim=self.use_ssim)
-        return cost.mean(), photometric_cost.mean(), smoothness_cost.mean(), kpts_cost.mean(), ref_frame, ref_inv_depth
+        return cost.mean(), photometric_cost.mean(), smoothness_cost.mean(), kpts_cost.mean(), ref_frame, ref_inv_depth, warp_img_save
 
     def save_model(self, file_path):
         torch.save(self.cpu().lkvo.module.depth_net.state_dict(),
@@ -171,7 +171,7 @@ class LKVOKernel(nn.Module):
 
         # smoothness_cost = self.vo.multi_scale_smoothness_cost(inv_depth_pyramid, levels=range(1,5))
         # smoothness_cost = self.vo.multi_scale_smoothness_cost(inv_depth0_pyramid, levels=range(1,5))
-        photometric_cost = self.vo.compute_phtometric_loss(self.vo.ref_frame_pyramid, src_frames_pyramid, ref_inv_depth_pyramid, src_inv_depth_pyramid, rot_mat_batch, trans_batch, levels=[0,1,2,3], use_ssim=use_ssim)
+        photometric_cost, warp_img_save = self.vo.compute_phtometric_loss(self.vo.ref_frame_pyramid, src_frames_pyramid, ref_inv_depth_pyramid, src_inv_depth_pyramid, rot_mat_batch, trans_batch, levels=[0,1,2,3], use_ssim=use_ssim)
         smoothness_cost = self.vo.multi_scale_image_aware_smoothness_cost(inv_depth0_pyramid, frames_pyramid, levels=[2,3], type=self.smooth_term) \
                             + self.vo.multi_scale_image_aware_smoothness_cost(inv_depth_norm_pyramid, frames_pyramid, levels=[2,3], type=self.smooth_term)
 
@@ -186,7 +186,7 @@ class LKVOKernel(nn.Module):
         # cost = photometric_cost + photometric_cost0 + reproj_cost + reproj_cost0 + lambda_S*smoothness_cost
 
         cost = photometric_cost + lambda_S*smoothness_cost + lambda_K*kpts_cost
-        return cost, photometric_cost, smoothness_cost, kpts_cost, self.vo.ref_frame_pyramid[0], ref_inv_depth0_pyramid[0]*inv_depth_mean_ten
+        return cost, photometric_cost, smoothness_cost, kpts_cost, self.vo.ref_frame_pyramid[0], ref_inv_depth0_pyramid[0]*inv_depth_mean_ten, warp_img_save
 
 
 if __name__  == "__main__":

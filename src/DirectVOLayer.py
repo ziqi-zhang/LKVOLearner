@@ -8,6 +8,7 @@ from ImagePyramid import ImagePyramidLayer
 from BilinearSampling import grid_bilinear_sampling
 from MatInverse import inv
 import os
+from pdb import set_trace as st
 
 import numpy as np
 
@@ -438,6 +439,9 @@ class DirectVO(nn.Module):
                     depth_pyramid[level_idx],
                     level_idx, rot_mat, trans)
             warp_img = warp_img.view((bundle_size-1)*2, IMG_CHAN, h, w)
+            # warp_img_save is the warped img from src to ref with full size
+            if level_idx==0:
+                warp_img_save = warp_img[0:2]
             if use_expl_mask:
                 mask = in_view_mask.view(-1,h,w)*expl_mask_pyramid[level_idx]
             else:
@@ -463,7 +467,7 @@ class DirectVO(nn.Module):
         #     ref_frame_warp_pyramid.append(ref_pyramid[level_idx]*127.5)
         #
         # return loss, frames_warp_pyramid, ref_frame_warp_pyramid
-        return loss
+        return loss, warp_img_save.detach()
 
     def compute_smoothness_cost(self, inv_depth):
         x = self.laplacian_func(inv_depth)

@@ -93,7 +93,7 @@ def main():
             frames = Variable(data[0].float().cuda())
             camparams = Variable(data[1])
             kpts = Variable(data[2]).cuda()
-            cost, photometric_cost, smoothness_cost, kpts_cost, frames, inv_depths = \
+            cost, photometric_cost, smoothness_cost, kpts_cost, frames, inv_depths, warp_img_save = \
                 lkvolearner.forward(frames, camparams, kpts, max_lk_iter_num=opt.max_lk_iter_num)
             # print(frames.size())
             # print(inv_depths.size())
@@ -136,11 +136,15 @@ def main():
                 depth_vis = depth_vis.astype(np.uint8)
                 print("Display: photometric_cost {:.3f}, smoothness_cost {:.3f}, cost {:.3f}".format(photometric_cost.data.cpu()[0],
                         smoothness_cost.data.cpu()[0], cost.data.cpu()[0]))
+                warp_img_save = warp_img_save.cpu().numpy()
+                warp_img_list = [warp_img_save[i] for i in range(warp_img_save.shape[0])]
+                warp_img_list = [img*255/(img.max()-img.min()+.00001) for img in warp_img_list]
+                warp_img_list = [img.transpose((1,2,0)).astype(np.uint8) for img in warp_img_list]
                 # visualizer.display_current_results(
                 #                 OrderedDict([('%s frame' % (opt.name), frame_vis),
                 #                         ('%s inv_depth' % (opt.name), depth_vis)]),
                 #                         epoch)
-                result_vis = np.hstack([frame_vis, depth_vis])
+                result_vis = np.vstack([frame_vis, depth_vis, warp_img_list[0], warp_img_list[1]])
                 save_image(result_vis, os.path.join(vis_dir, 'depth_%s.png'%step_num))
                 # sio.savemat(os.path.join(opt.checkpoints_dir, 'depth_%s.mat' % (step_num)),
                 #     {'D': inv_depths.data.cpu().numpy(),
