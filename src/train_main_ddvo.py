@@ -10,6 +10,8 @@ import os
 
 from LKVOLearner import LKVOLearner
 from KITTIdataset import KITTIdataset
+from testKITTI import predKITTI
+from util.eval_depth import evaluate
 
 from collections import OrderedDict
 from options.train_options import TrainOptions
@@ -28,7 +30,21 @@ def vis_depthmap(input):
     x = (input-input.min()) * (255/(input.max()-input.min()+.00001))
     return x.unsqueeze(2).repeat(1, 1, 3)
 
-def 
+def validate(lkvolearner, dataset_root, epoch, vis_dir=None,
+                img_size=[128, 416]):
+    vgg_depth_net = lkvolearner.lkvo.module.depth_net
+    test_file_list = os.path.join(dataset_root, 'list', 'eigen_test_files.txt')
+    print("Predicting validate set")
+    pred_depths = predKITTI(vgg_depth_net, dataset_root, test_file_list, img_size,
+                vis_dir=vis_dir, use_pp=True)
+
+    # pred_depths = np.zeros((697, 128, 375))+1
+    print("Evaluating")
+    evaluate(pred_depths, test_file_list, dataset_root)
+    st()
+
+
+
 
 def main():
     opt = TrainOptions().parse()
@@ -57,11 +73,6 @@ def main():
 
     ref_frame_idx = 1
 
-
-
-
-
-
     optimizer = optim.Adam(lkvolearner.get_parameters(), lr=.0001)
 
     step_num = 0
@@ -69,8 +80,10 @@ def main():
 
 
     for epoch in range(max(0, opt.which_epoch), opt.epoch_num+1):
+        vis_dir = os.path.join(opt.vis_dir, str(epoch))
         t = timer()
         for ii, data in enumerate(dataloader):
+            break
             optimizer.zero_grad()
             frames = Variable(data[0].float().cuda())
             camparams = Variable(data[1])
@@ -122,7 +135,7 @@ def main():
                 #                         ('%s inv_depth' % (opt.name), depth_vis)]),
                 #                         epoch)
                 result_vis = np.hstack([frame_vis, depth_vis])
-                save_image(result_vis, os.path.join(opt.vis_dir, 'depth_%s.png'%step_num))
+                save_image(result_vis, os.path.join(vis_dir, 'depth_%s.png'%step_num))
                 # sio.savemat(os.path.join(opt.checkpoints_dir, 'depth_%s.mat' % (step_num)),
                 #     {'D': inv_depths.data.cpu().numpy(),
                 #      'I': frame_vis})
@@ -137,6 +150,8 @@ def main():
                 print()
 
         #eval
+        validate(lkvolearner, opt.val_data_root_path, epoch)
+
 
 if __name__=='__main__':
     main()

@@ -10,6 +10,7 @@ class BaseOptions():
 
     def initialize(self):
         self.parser.add_argument('--dataroot', required=True, help='path to images (should have subfolders trainA, trainB, valA, valB, etc)')
+        self.parser.add_argument('--val_data_root_path', required=True)
         self.parser.add_argument('--batchSize', type=int, default=1, help='input batch size')
         self.parser.add_argument('--imH', type=int, default=128, help='imH')
         self.parser.add_argument('--imW', type=int, default=416, help='imW')

@@ -63,10 +63,17 @@ def main():
     vgg_depth_net.load_state_dict(torch.load(model_path))
     vgg_depth_net.cuda()
 
-    testKITTI(vgg_depth_net, dataset_root, test_file_list, output_path, img_size,
+    pred_depths = predKITTI(vgg_depth_net, dataset_root, test_file_list, img_size,
                 vis_dir=FLAGS.vis_dir, use_pp=FLAGS.use_pp)
+    print(pred_depths.shape)
+    np.save(output_path, pred_depths)
+    # import scipy.io as sio
+    # sio.savemat(output_path, {'D': pred_depths})
+        # print(pred_depth_pyramid[0].size())
+        # plt.imshow(pred_depth_pyramid[0].data.cpu().squeeze().numpy())
+        # plt.show()
 
-def testKITTI(model, dataset_root, test_file_list, output_path, img_size=[128, 416],
+def predKITTI(model, dataset_root, test_file_list, img_size=[128, 416],
                 vis_dir=None, use_pp=True):
     print("Begin test KITTI")
 
@@ -76,7 +83,8 @@ def testKITTI(model, dataset_root, test_file_list, output_path, img_size=[128, 4
     pred_depths = []
     i = 0
     for filename in test_files:
-        print(i)
+        if i==0:
+            print(filename)
         filename = filename.split()[0]
         im_path = os.path.join(dataset_root, filename)
         img_pil = Image.open(im_path).resize((img_size[1], img_size[0]), Image.ANTIALIAS)
@@ -114,13 +122,7 @@ def testKITTI(model, dataset_root, test_file_list, output_path, img_size=[128, 4
         # if i==3:
         #     break
     pred_depths = np.asarray(pred_depths)
-    print(pred_depths.shape)
-    np.save(output_path, 1/pred_depths)
-    # import scipy.io as sio
-    # sio.savemat(output_path, {'D': pred_depths})
-        # print(pred_depth_pyramid[0].size())
-        # plt.imshow(pred_depth_pyramid[0].data.cpu().squeeze().numpy())
-        # plt.show()
+    return 1/pred_depths
 
 if __name__=='__main__':
     main()
