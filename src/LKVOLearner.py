@@ -90,7 +90,6 @@ class LKVOKernel(nn.Module):
         for i in range(ref_num):
             diff.append((kpts_depth[i*2,:]-kpts_depth[i*2+1,:]).abs())
         diff = torch.stack(diff)
-        print(diff)
         diff_mean = diff.mean()
 
         return diff_mean
@@ -119,7 +118,6 @@ class LKVOKernel(nn.Module):
             kpt_diff = torch.stack(kpt_diff)
             kpts_depth.append(kpt_diff)
         kpts_depth = torch.stack(kpts_depth)
-        print(kpts_depth)
         mean = kpts_depth.mean()
         return mean
 

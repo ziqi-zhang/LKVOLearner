@@ -83,8 +83,6 @@ def predKITTI(model, dataset_root, test_file_list, img_size=[128, 416],
     pred_depths = []
     i = 0
     for filename in test_files:
-        if i==0:
-            print(filename)
         filename = filename.split()[0]
         im_path = os.path.join(dataset_root, filename)
         img_pil = Image.open(im_path).resize((img_size[1], img_size[0]), Image.ANTIALIAS)

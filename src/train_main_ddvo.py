@@ -7,11 +7,13 @@ from torch.autograd import Variable
 from torch.utils.data import DataLoader
 import scipy.io as sio
 import os
+import csv
 
 from LKVOLearner import LKVOLearner
 from KITTIdataset import KITTIdataset
 from testKITTI import predKITTI
 from util.eval_depth import evaluate
+from util.depth_visualize import vis_depthmap
 
 from collections import OrderedDict
 from options.train_options import TrainOptions
@@ -24,11 +26,10 @@ from pdb import set_trace as st
 from util.logger import Logger
 from util.util import *
 from PIL import Image
+fieldnames = ['abs_rel', 'sq_rel', 'rms', 'log_rms', 'd1_all',
+                'a1', 'a2', 'a3']
 
 
-def vis_depthmap(input):
-    x = (input-input.min()) * (255/(input.max()-input.min()+.00001))
-    return x.unsqueeze(2).repeat(1, 1, 3)
 
 def validate(lkvolearner, dataset_root, epoch, vis_dir=None,
                 img_size=[128, 416]):
@@ -40,17 +41,19 @@ def validate(lkvolearner, dataset_root, epoch, vis_dir=None,
 
     # pred_depths = np.zeros((697, 128, 375))+1
     print("Evaluating")
-    evaluate(pred_depths, test_file_list, dataset_root)
-    st()
-
-
-
+    abs_rel, sq_rel, rms, log_rms, d1_all, a1, a2, a3 = \
+        evaluate(pred_depths, test_file_list, dataset_root)
+    return abs_rel, sq_rel, rms, log_rms, d1_all, a1, a2, a3
 
 def main():
     opt = TrainOptions().parse()
     logger = Logger(opt.tf_log_dir)
     img_size = [opt.imH, opt.imW]
 
+    test_csv = os.path.join(opt.checkpoints_dir, 'test.csv')
+    with open(test_csv, 'w') as csvfile:
+        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+        writer.writeheader()
     # visualizer = Visualizer(opt)
 
     dataset = KITTIdataset(data_root_path=opt.dataroot, img_size=img_size, bundle_size=3)
@@ -81,9 +84,11 @@ def main():
 
     for epoch in range(max(0, opt.which_epoch), opt.epoch_num+1):
         vis_dir = os.path.join(opt.vis_dir, str(epoch))
+        if not os.path.exists(vis_dir):
+            os.makedirs(vis_dir)
         t = timer()
         for ii, data in enumerate(dataloader):
-            break
+
             optimizer.zero_grad()
             frames = Variable(data[0].float().cuda())
             camparams = Variable(data[1])
@@ -127,7 +132,8 @@ def main():
                 # frame_vis = frames.data[:,1,:,:,:].permute(0,2,3,1).contiguous().view(-1,opt.imW, 3).cpu().numpy().astype(np.uint8)
                 # depth_vis = vis_depthmap(inv_depths.data[:,1,:,:].contiguous().view(-1,opt.imW).cpu()).numpy().astype(np.uint8)
                 frame_vis = frames.data.permute(1,2,0).contiguous().cpu().numpy().astype(np.uint8)
-                depth_vis = vis_depthmap(inv_depths.data.cpu()).numpy().astype(np.uint8)
+                depth_vis = vis_depthmap(inv_depths.data.cpu().numpy())*255
+                depth_vis = depth_vis.astype(np.uint8)
                 print("Display: photometric_cost {:.3f}, smoothness_cost {:.3f}, cost {:.3f}".format(photometric_cost.data.cpu()[0],
                         smoothness_cost.data.cpu()[0], cost.data.cpu()[0]))
                 # visualizer.display_current_results(
@@ -150,8 +156,13 @@ def main():
                 print()
 
         #eval
-        validate(lkvolearner, opt.val_data_root_path, epoch)
-
+        abs_rel, sq_rel, rms, log_rms, d1_all, a1, a2, a3 = \
+            validate(lkvolearner, opt.val_data_root_path, epoch)
+        with open(test_csv, 'a') as csvfile:
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+            writer.writerow({'abs_rel': abs_rel, 'sq_rel': sq_rel, 'rms': rms,
+                'log_rms':log_rms, 'd1_all':d1_all,
+                'a1': a1, 'a2': a2, 'a3': a3})
 
 if __name__=='__main__':
     main()
