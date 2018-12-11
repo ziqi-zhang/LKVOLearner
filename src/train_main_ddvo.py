@@ -28,6 +28,8 @@ def vis_depthmap(input):
     x = (input-input.min()) * (255/(input.max()-input.min()+.00001))
     return x.unsqueeze(2).repeat(1, 1, 3)
 
+def 
+
 def main():
     opt = TrainOptions().parse()
     logger = Logger(opt.tf_log_dir)
@@ -133,6 +135,8 @@ def main():
 
             if np.mod(step_num, opt.print_freq)==0:
                 print()
+
+        #eval
 
 if __name__=='__main__':
     main()
