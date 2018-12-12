@@ -4,9 +4,10 @@ import cv2
 import os
 import numpy as np
 import argparse
+from pdb import set_trace as st
 from util.depth_evaluation_utils import *
 
-def evaluate(pred_depths, test_file_list, data_dir, min_depth=1e-3, max_depth=80):
+def evaluate(pred_depths, test_file_list, data_dir, min_depth=1e-2, max_depth=80):
 
     test_files = read_text_lines(test_file_list)
     gt_files, gt_calib, im_sizes, im_files, cams = \
@@ -37,6 +38,8 @@ def evaluate(pred_depths, test_file_list, data_dir, min_depth=1e-3, max_depth=80
     a1      = np.zeros(num_test, np.float32)
     a2      = np.zeros(num_test, np.float32)
     a3      = np.zeros(num_test, np.float32)
+
+    error_maps = []
     for i in range(num_test):
         gt_depth = gt_depths[i]
         pred_depth = np.copy(pred_depths[i])
@@ -59,12 +62,18 @@ def evaluate(pred_depths, test_file_list, data_dir, min_depth=1e-3, max_depth=80
 
         pred_depth[pred_depth < min_depth] = min_depth
         pred_depth[pred_depth > max_depth] = max_depth
+        error_depth = np.abs(gt_depth - pred_depth)
+        error_depth[1-mask] = 0
+        # error_depth[error_depth > max_depth] = max_depth
+        # error_depth[error_depth < min_depth] = min_depth
+        error_maps.append(error_depth)
         abs_rel[i], sq_rel[i], rms[i], log_rms[i], a1[i], a2[i], a3[i] = \
             compute_errors(gt_depth[mask], pred_depth[mask])
 
+
     print("{:>10}, {:>10}, {:>10}, {:>10}, {:>10}, {:>10}, {:>10}, {:>10}".format('abs_rel', 'sq_rel', 'rms', 'log_rms', 'd1_all', 'a1', 'a2', 'a3'))
     print("{:10.4f}, {:10.4f}, {:10.4f}, {:10.4f}, {:10.4f}, {:10.4f}, {:10.4f}, {:10.4f}".format(abs_rel.mean(), sq_rel.mean(), rms.mean(), log_rms.mean(), d1_all.mean(), a1.mean(), a2.mean(), a3.mean()))
-    return abs_rel.mean(), sq_rel.mean(), rms.mean(), log_rms.mean(), d1_all.mean(), a1.mean(), a2.mean(), a3.mean()
+    return abs_rel.mean(), sq_rel.mean(), rms.mean(), log_rms.mean(), d1_all.mean(), a1.mean(), a2.mean(), a3.mean(), np.asarray(error_maps)
 
 def main():
     parser = argparse.ArgumentParser()

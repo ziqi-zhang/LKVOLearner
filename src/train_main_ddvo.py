@@ -8,6 +8,8 @@ from torch.utils.data import DataLoader
 import scipy.io as sio
 import os
 import csv
+import cv2
+import shutil
 
 from LKVOLearner import LKVOLearner
 from KITTIdataset import KITTIdataset
@@ -26,23 +28,56 @@ from pdb import set_trace as st
 from util.logger import Logger
 from util.util import *
 from PIL import Image
+from multiprocessing import Pool
 fieldnames = ['abs_rel', 'sq_rel', 'rms', 'log_rms', 'd1_all',
                 'a1', 'a2', 'a3']
 
 
+def save_val_images(data):
+        i, (depth, raw_img, error, val_vis_dir) = data
+        error = error.transpose(1,0)
+        depth = cv2.resize(depth, error.shape)
+        raw_img = cv2.resize(raw_img, error.shape)
+        error = error.transpose(1,0)
+        depth = vis_depthmap(1/depth)*255
+        # mask = error!=0
+        # error[mask] = 1/error[mask]
+        mask = (error == 0)
+        error = vis_depthmap(error)*255
+        error[mask] = 0
+        img_path = os.path.join(val_vis_dir, "%03d.png"%i)
+        img = np.vstack((raw_img, depth, error))
+        img = img.astype(np.uint8)
+        save_image(img, img_path)
 
 def validate(lkvolearner, dataset_root, epoch, vis_dir=None,
                 img_size=[128, 416]):
+
     vgg_depth_net = lkvolearner.lkvo.module.depth_net
     test_file_list = os.path.join(dataset_root, 'list', 'eigen_test_files.txt')
     print("Predicting validate set")
-    pred_depths = predKITTI(vgg_depth_net, dataset_root, test_file_list, img_size,
-                vis_dir=vis_dir, use_pp=True)
+    pred_depths, raw_images = predKITTI(vgg_depth_net, dataset_root, test_file_list, img_size,
+                use_pp=True)
 
     # pred_depths = np.zeros((697, 128, 375))+1
     print("Evaluating")
-    abs_rel, sq_rel, rms, log_rms, d1_all, a1, a2, a3 = \
+    abs_rel, sq_rel, rms, log_rms, d1_all, a1, a2, a3, error_maps = \
         evaluate(pred_depths, test_file_list, dataset_root)
+    assert pred_depths.shape[0] == raw_images.shape[0] == error_maps.shape[0]
+    n = pred_depths.shape[0]
+    if vis_dir is not None:
+        val_vis_dir = os.path.join(vis_dir, "val_%02d"%epoch)
+        mkdir(val_vis_dir)
+
+        pred_depths = list(pred_depths)
+        raw_images = list(raw_images)
+        error_maps = list(error_maps)
+        data_pack = list(enumerate(zip(pred_depths, raw_images, error_maps, [val_vis_dir for _ in range(n)])))
+        pool = Pool(20)
+        pool.map(save_val_images, data_pack)
+        pool.close()
+        pool.join()
+
     return abs_rel, sq_rel, rms, log_rms, d1_all, a1, a2, a3
 
 def main():
@@ -83,9 +118,9 @@ def main():
 
 
     for epoch in range(max(0, opt.which_epoch), opt.epoch_num+1):
-        vis_dir = os.path.join(opt.vis_dir, str(epoch))
-        if not os.path.exists(vis_dir):
-            os.makedirs(vis_dir)
+
+        vis_dir = os.path.join(opt.vis_dir, "train_%02d"%epoch)
+        mkdir(vis_dir)
         t = timer()
         for ii, data in enumerate(dataloader):
 
@@ -93,7 +128,8 @@ def main():
             frames = Variable(data[0].float().cuda())
             camparams = Variable(data[1])
             kpts = Variable(data[2]).cuda()
-            cost, photometric_cost, smoothness_cost, kpts_cost, frames, inv_depths, warp_img_save = \
+            cost, photometric_cost, smoothness_cost, kpts_cost, frames, \
+            inv_depths, warp_img_save = \
                 lkvolearner.forward(frames, camparams, kpts, max_lk_iter_num=opt.max_lk_iter_num)
             # print(frames.size())
             # print(inv_depths.size())
@@ -116,17 +152,17 @@ def main():
                 print('epoch %s[%s/%s], ... elapsed time: %f (s)' % (epoch, step_num, int(len(dataset)/opt.batchSize), elapsed_time))
                 print(inv_depths_mean)
                 t = timer()
-                print("Print: photometric_cost {:.3f}, smoothness_cost {:.3f}, cost {:.3f}".format(photometric_cost.data.cpu()[0],
-                        smoothness_cost.data.cpu()[0], cost.data.cpu()[0]))
+                print("Print: photometric_cost {:.3f}, smoothness_cost {:.3f}, cost {:.3f}".format(photometric_cost.data.cpu().item(),
+                        smoothness_cost.data.cpu().item(), cost.data.cpu().item()))
                 # visualizer.plot_current_errors(step_num, 1, opt,
                 #             OrderedDict([('photometric_cost', photometric_cost.data.cpu()[0]),
                 #              ('smoothness_cost', smoothness_cost.data.cpu()[0]),
                 #              ('cost', cost.data.cpu()[0])]))
 
-                logger.add_scalar('train/photo', photometric_cost.data.cpu()[0], step_num)
-                logger.add_scalar('train/smooth',smoothness_cost.data.cpu()[0], step_num)
-                logger.add_scalar('train/kpt', kpts_cost.cpu()[0], step_num)
-                logger.add_scalar('train/cost', cost.data.cpu()[0], step_num)
+                logger.add_scalar('train/photo', photometric_cost.data.cpu().item(), step_num)
+                logger.add_scalar('train/smooth',smoothness_cost.data.cpu().item(), step_num)
+                logger.add_scalar('train/kpt', kpts_cost.cpu().item(), step_num)
+                logger.add_scalar('train/cost', cost.data.cpu().item(), step_num)
 
             if np.mod(step_num, opt.display_freq)==0:
                 # frame_vis = frames.data[:,1,:,:,:].permute(0,2,3,1).contiguous().view(-1,opt.imW, 3).cpu().numpy().astype(np.uint8)
@@ -134,8 +170,8 @@ def main():
                 frame_vis = frames.data.permute(1,2,0).contiguous().cpu().numpy().astype(np.uint8)
                 depth_vis = vis_depthmap(inv_depths.data.cpu().numpy())*255
                 depth_vis = depth_vis.astype(np.uint8)
-                print("Display: photometric_cost {:.3f}, smoothness_cost {:.3f}, cost {:.3f}".format(photometric_cost.data.cpu()[0],
-                        smoothness_cost.data.cpu()[0], cost.data.cpu()[0]))
+                print("Display: photometric_cost {:.3f}, smoothness_cost {:.3f}, cost {:.3f}".format(photometric_cost.data.cpu().item(),
+                        smoothness_cost.data.cpu().item(), cost.data.cpu().item()))
                 warp_img_save = warp_img_save.cpu().numpy()
                 warp_img_list = [warp_img_save[i] for i in range(warp_img_save.shape[0])]
                 warp_img_list = [img*255/(img.max()-img.min()+.00001) for img in warp_img_list]
@@ -158,15 +194,24 @@ def main():
 
             if np.mod(step_num, opt.print_freq)==0:
                 print()
-
+            break
         #eval
         abs_rel, sq_rel, rms, log_rms, d1_all, a1, a2, a3 = \
-            validate(lkvolearner, opt.val_data_root_path, epoch)
+            validate(lkvolearner, opt.val_data_root_path, epoch, opt.vis_dir)
         with open(test_csv, 'a') as csvfile:
             writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
             writer.writerow({'abs_rel': abs_rel, 'sq_rel': sq_rel, 'rms': rms,
                 'log_rms':log_rms, 'd1_all':d1_all,
                 'a1': a1, 'a2': a2, 'a3': a3})
+        if epoch%3==0 and epoch>0:
+            pre_train_dir = os.path.join(opt.vis_dir, "train_%02d"%(epoch-1))
+            pre_val_dir = os.path.join(opt.vis_dir, "val_%02d"%(epoch-1))
+            del_list = [pre_train_dir, pre_val_dir]
+            pre_train_dir = os.path.join(opt.vis_dir, "train_%02d"%(epoch-2))
+            pre_val_dir = os.path.join(opt.vis_dir, "val_%02d"%(epoch-2))
+            del_list.append(pre_train_dir)
+            del_list.append(pre_val_dir)
+            deldirs(del_list)
 
 if __name__=='__main__':
     main()

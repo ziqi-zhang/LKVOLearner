@@ -137,9 +137,9 @@ class VggDepthEstimator(nn.Module):
                     x = x[:, :, :-1, :]
 
             if i==(len(self.upconv_layers)-1):
-                x = torch.cat((x, nn.Upsample(scale_factor=2, mode='bilinear')(invdepth_pyramid[-1])), 1)
+                x = torch.cat((x, nn.functional.interpolate(invdepth_pyramid[-1], scale_factor=2, mode='bilinear')), 1)
             elif i > 3:
-                x = torch.cat((x, self.conv_feats[-(2+i)], nn.Upsample(scale_factor=2, mode='bilinear')(invdepth_pyramid[-1])), 1)
+                x = torch.cat((x, self.conv_feats[-(2+i)], nn.functional.interpolate(invdepth_pyramid[-1], scale_factor=2, mode='bilinear')), 1)
             else:
                 x = torch.cat((x, self.conv_feats[-(2+i)]), 1)
             upconv_feats.append(self.iconv_layers[i].forward(x))

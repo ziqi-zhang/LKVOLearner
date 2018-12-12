@@ -5,6 +5,7 @@ from PIL import Image
 import inspect, re
 import numpy as np
 import os
+import shutil
 import collections
 
 # Converts a Tensor into a Numpy array
@@ -69,3 +70,14 @@ def mkdirs(paths):
 def mkdir(path):
     if not os.path.exists(path):
         os.makedirs(path)
+
+def deldirs(paths):
+    if isinstance(paths, list) and not isinstance(paths, str):
+        for path in paths:
+            deldir(path)
+    else:
+        deldir(paths)
+
+def deldir(path):
+    if os.path.exists(path):
+        shutil.rmtree(path)

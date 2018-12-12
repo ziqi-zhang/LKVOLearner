@@ -63,7 +63,7 @@ def main():
     vgg_depth_net.load_state_dict(torch.load(model_path))
     vgg_depth_net.cuda()
 
-    pred_depths = predKITTI(vgg_depth_net, dataset_root, test_file_list, img_size,
+    pred_depths, _ = predKITTI(vgg_depth_net, dataset_root, test_file_list, img_size,
                 vis_dir=FLAGS.vis_dir, use_pp=FLAGS.use_pp)
     print(pred_depths.shape)
     np.save(output_path, pred_depths)
@@ -80,7 +80,8 @@ def predKITTI(model, dataset_root, test_file_list, img_size=[128, 416],
     fliplr = FlipLR(imW=img_size[1], dim_w=2).cuda()
 
     test_files = read_text_lines(test_file_list)
-    pred_depths = []
+    pred_disp = []
+    raw_images = []
     i = 0
     for filename in test_files:
         filename = filename.split()[0]
@@ -88,6 +89,7 @@ def predKITTI(model, dataset_root, test_file_list, img_size=[128, 416],
         img_pil = Image.open(im_path).resize((img_size[1], img_size[0]), Image.ANTIALIAS)
         # img_pil.save('kitti_test_images/%04d.png'%(i))
         img = np.array(img_pil)
+        raw_images.append(img)
         # print(img.shape)
         img = img.transpose(2, 0, 1)
         # print(img.shape)
@@ -98,29 +100,29 @@ def predKITTI(model, dataset_root, test_file_list, img_size=[128, 416],
         if use_pp:
             # flip image
             img_vars = (torch.cat((fliplr(img_var).unsqueeze(0), img_var.unsqueeze(0)), 0)-127)/127
-            pred_depth_pyramid = model.forward(img_vars)
-            depth = pred_depth_pyramid[0]
+            pred_disp_pyramid = model.forward(img_vars)
+            disp = pred_disp_pyramid[0]
             # print(depth.size())
-            depth_mean = (fliplr(depth[0:1, :, :]) + depth[1:2, :, :])*.5
-            depth_mean = depth_mean.data.cpu().squeeze().numpy()
-            pred_depths.append(depth_mean)
+            disp_mean = (fliplr(disp[0:1, :, :]) + disp[1:2, :, :])*.5
+            disp_mean = disp_mean.data.cpu().squeeze().numpy()
+            pred_disp.append(disp_mean)
             # compute mean
         else:
-            pred_depth_pyramid = model.forward((img_var.unsqueeze(0)-127)/127)
-            pred_depths.append(pred_depth_pyramid[0].data.cpu().squeeze().numpy())
+            pred_disp_pyramid = model.forward((img_var.unsqueeze(0)-127)/127)
+            pred_disp.append(pred_disp_pyramid[0].data.cpu().squeeze().numpy())
         if vis_dir is not None:
-            depth_vis = colored_depthmap(pred_depths[-1])
-            vis_img = np.hstack([img_pil, depth_vis])
+            disp_vis = colored_depthmap(pred_disp[-1])
+            vis_img = np.hstack([img_pil, disp_vis])
             vis_file_name = filepath_to_filename(filename)
             vis_file_path = os.path.join(vis_dir, vis_file_name)
             Image.fromarray(vis_img).save(vis_file_path)
 
         # set_trace()
         i = i+1
-        # if i==3:
-        #     break
-    pred_depths = np.asarray(pred_depths)
-    return 1/pred_depths
+
+    pred_disp = np.asarray(pred_disp)
+    raw_images = np.asarray(raw_images)
+    return 1/pred_disp, raw_images
 
 if __name__=='__main__':
     main()
