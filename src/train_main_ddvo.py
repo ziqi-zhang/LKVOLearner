@@ -194,7 +194,6 @@ def main():
 
             if np.mod(step_num, opt.print_freq)==0:
                 print()
-            break
         #eval
         abs_rel, sq_rel, rms, log_rms, d1_all, a1, a2, a3 = \
             validate(lkvolearner, opt.val_data_root_path, epoch, opt.vis_dir)
