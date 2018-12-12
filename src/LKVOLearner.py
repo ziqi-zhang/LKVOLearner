@@ -32,9 +32,12 @@ class LKVOLearner(nn.Module):
         self.use_ssim = use_ssim
 
     def forward(self, frames, camparams, kpts, max_lk_iter_num=10):
-        cost, photometric_cost, smoothness_cost, kpts_cost, ref_frame, ref_inv_depth, warp_img_save \
+        cost, photometric_cost, smoothness_cost, kpts_cost, ref_inv_depth, \
+            frame_save, depth_save, warp_img_save \
             = self.lkvo.forward(frames, camparams, kpts, self.ref_frame_idx, self.lambda_S, self.lambda_K, max_lk_iter_num=max_lk_iter_num, use_ssim=self.use_ssim)
-        return cost.mean(), photometric_cost.mean(), smoothness_cost.mean(), kpts_cost.mean(), ref_frame, ref_inv_depth, warp_img_save
+        return cost.mean(), photometric_cost.mean(), smoothness_cost.mean(), \
+                kpts_cost.mean(), ref_inv_depth, \
+                frame_save, depth_save, warp_img_save
 
     def save_model(self, file_path):
         torch.save(self.cpu().lkvo.module.depth_net.state_dict(),
@@ -186,7 +189,15 @@ class LKVOKernel(nn.Module):
         # cost = photometric_cost + photometric_cost0 + reproj_cost + reproj_cost0 + lambda_S*smoothness_cost
 
         cost = photometric_cost + lambda_S*smoothness_cost + lambda_K*kpts_cost
-        return cost, photometric_cost, smoothness_cost, kpts_cost, self.vo.ref_frame_pyramid[0], ref_inv_depth0_pyramid[0]*inv_depth_mean_ten, warp_img_save
+
+        frame_save = [src_frames_pyramid[0][i] for i in range(0,ref_frame_idx)]+ \
+                     [self.vo.ref_frame_pyramid[0]] + \
+                     [src_frames_pyramid[0][i-1] for i in range(ref_frame_idx+1,bundle_size)]
+        depth_save = [src_inv_depth0_pyramid[0][i]*inv_depth_mean_ten for i in range(0,ref_frame_idx)] + \
+                     [ref_inv_depth0_pyramid[0]*inv_depth_mean_ten] + \
+                     [src_inv_depth0_pyramid[0][i-1]*inv_depth_mean_ten for i in range(ref_frame_idx+1,bundle_size)]
+        return cost, photometric_cost, smoothness_cost, kpts_cost, ref_inv_depth0_pyramid[0]*inv_depth_mean_ten, \
+                frame_save, depth_save, warp_img_save
 
 
 if __name__  == "__main__":

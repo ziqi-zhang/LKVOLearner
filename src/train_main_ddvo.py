@@ -128,8 +128,8 @@ def main():
             frames = Variable(data[0].float().cuda())
             camparams = Variable(data[1])
             kpts = Variable(data[2]).cuda()
-            cost, photometric_cost, smoothness_cost, kpts_cost, frames, \
-            inv_depths, warp_img_save = \
+            cost, photometric_cost, smoothness_cost, kpts_cost, inv_depths, \
+            frame_list, inv_depth_list, warp_img_list = \
                 lkvolearner.forward(frames, camparams, kpts, max_lk_iter_num=opt.max_lk_iter_num)
             # print(frames.size())
             # print(inv_depths.size())
@@ -167,21 +167,25 @@ def main():
             if np.mod(step_num, opt.display_freq)==0:
                 # frame_vis = frames.data[:,1,:,:,:].permute(0,2,3,1).contiguous().view(-1,opt.imW, 3).cpu().numpy().astype(np.uint8)
                 # depth_vis = vis_depthmap(inv_depths.data[:,1,:,:].contiguous().view(-1,opt.imW).cpu()).numpy().astype(np.uint8)
-                frame_vis = frames.data.permute(1,2,0).contiguous().cpu().numpy().astype(np.uint8)
-                depth_vis = vis_depthmap(inv_depths.data.cpu().numpy())*255
-                depth_vis = depth_vis.astype(np.uint8)
+
+                frame_vis_list = [frame.data.permute(1,2,0).contiguous().cpu().numpy().astype(np.uint8) for frame in frame_list]
+                depth_vis_list = [(vis_depthmap(inv_depths.data.cpu().numpy())*255).astype(np.uint8) for depth in inv_depth_list]
                 print("Display: photometric_cost {:.3f}, smoothness_cost {:.3f}, cost {:.3f}".format(photometric_cost.data.cpu().item(),
                         smoothness_cost.data.cpu().item(), cost.data.cpu().item()))
-                warp_img_save = warp_img_save.cpu().numpy()
-                warp_img_list = [warp_img_save[i] for i in range(warp_img_save.shape[0])]
+                warp_img_list = [img.cpu().numpy() for img in warp_img_list]
                 warp_img_list = [img*255/(img.max()-img.min()+.00001) for img in warp_img_list]
-                warp_img_list = [img.transpose((1,2,0)).astype(np.uint8) for img in warp_img_list]
+                warp_img_list = [img.transpose((0,2,3,1)).astype(np.uint8) for img in warp_img_list]
+                zeros = np.zeros(warp_img_list[0][0].shape)
                 # visualizer.display_current_results(
                 #                 OrderedDict([('%s frame' % (opt.name), frame_vis),
                 #                         ('%s inv_depth' % (opt.name), depth_vis)]),
                 #                         epoch)
-                result_vis = np.vstack([frame_vis, depth_vis, warp_img_list[0], warp_img_list[1]])
-                save_image(result_vis, os.path.join(vis_dir, 'depth_%s.png'%step_num))
+
+                left_vis = np.vstack([frame_vis_list[0], depth_vis_list[0], warp_img_list[0][0], zeros])
+                mid_vis = np.vstack([frame_vis_list[1], depth_vis_list[1], warp_img_list[1][0], warp_img_list[1][1]])
+                right_vis = np.vstack([frame_vis_list[2], depth_vis_list[2], warp_img_list[2][0], zeros])
+                result_vis = np.hstack([left_vis, mid_vis, right_vis]).astype(np.uint8)
+                save_image(result_vis, os.path.join(vis_dir, 'depth_%05d.png'%step_num))
                 # sio.savemat(os.path.join(opt.checkpoints_dir, 'depth_%s.mat' % (step_num)),
                 #     {'D': inv_depths.data.cpu().numpy(),
                 #      'I': frame_vis})
