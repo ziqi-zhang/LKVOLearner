@@ -99,13 +99,20 @@ def main():
 
 
     lkvolearner = LKVOLearner(img_size=img_size, ref_frame_idx=1, lambda_S=opt.lambda_S,
-            lambda_K = opt.lambda_K, gpu_ids = gpu_ids, smooth_term = opt.smooth_term, use_ssim=opt.use_ssim)
+            lambda_K = opt.lambda_K, gpu_ids = gpu_ids, smooth_term = opt.smooth_term,
+            use_ssim=opt.use_ssim)
     lkvolearner.init_weights()
 
 
     if opt.which_epoch >= 0:
         print("load pretrained model")
-        lkvolearner.load_model(os.path.join(opt.checkpoints_dir, '%s_model.pth' % (opt.which_epoch)))
+        # lkvolearner.load_model(os.path.join(opt.checkpoints_dir, '%s_model.pth' % (opt.which_epoch)))
+        lkvolearner.load_model(os.path.join(opt.checkpoints_dir, '%s_model.pth' % (opt.which_epoch)),
+                            os.path.join(opt.checkpoints_dir, 'pose_net.pth'))
+    else:
+        print("load pretrained models")
+        lkvolearner.load_model(os.path.join(opt.checkpoints_dir, 'depth_net.pth'),
+                            os.path.join(opt.checkpoints_dir, 'pose_net.pth'))
 
     lkvolearner.cuda()
 
@@ -130,7 +137,9 @@ def main():
             kpts = Variable(data[2]).cuda()
             cost, photometric_cost, smoothness_cost, kpts_cost, inv_depths, \
             frame_list, inv_depth_list, warp_img_list = \
-                lkvolearner.forward(frames, camparams, kpts, max_lk_iter_num=opt.max_lk_iter_num)
+                lkvolearner.forward(frames, camparams, kpts, \
+                                    max_lk_iter_num=opt.max_lk_iter_num, \
+                                    lk_level=opt.lk_level)
             # print(frames.size())
             # print(inv_depths.size())
             cost_ = cost.data.cpu()

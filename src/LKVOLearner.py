@@ -1,5 +1,5 @@
 from DirectVOLayer import DirectVO
-from networks import VggDepthEstimator
+from networks import VggDepthEstimator, PoseNet
 from ImagePyramid import ImagePyramidLayer
 import torch.nn as nn
 import torch
@@ -31,10 +31,12 @@ class LKVOLearner(nn.Module):
         self.lambda_K = lambda_K
         self.use_ssim = use_ssim
 
-    def forward(self, frames, camparams, kpts, max_lk_iter_num=10):
+    def forward(self, frames, camparams, kpts, max_lk_iter_num=10, lk_level=1):
         cost, photometric_cost, smoothness_cost, kpts_cost, ref_inv_depth, \
             frame_save, depth_save, warp_img_save \
-            = self.lkvo.forward(frames, camparams, kpts, self.ref_frame_idx, self.lambda_S, self.lambda_K, max_lk_iter_num=max_lk_iter_num, use_ssim=self.use_ssim)
+            = self.lkvo.forward(frames, camparams, kpts, self.ref_frame_idx, \
+                                self.lambda_S, self.lambda_K, max_lk_iter_num=max_lk_iter_num, \
+                                use_ssim=self.use_ssim, lk_level=lk_level)
         return cost.mean(), photometric_cost.mean(), smoothness_cost.mean(), \
                 kpts_cost.mean(), ref_inv_depth, \
                 frame_save, depth_save, warp_img_save
@@ -44,8 +46,9 @@ class LKVOLearner(nn.Module):
             file_path)
         self.cuda()
 
-    def load_model(self, file_path):
-        self.lkvo.module.depth_net.load_state_dict(torch.load(file_path))
+    def load_model(self, depth_net_file_path, pose_net_file_path):
+        self.lkvo.module.depth_net.load_state_dict(torch.load(depth_net_file_path))
+        self.lkvo.module.pose_net.load_state_dict(torch.load(pose_net_file_path))
 
     def init_weights(self):
         self.lkvo.module.depth_net.init_weights()
@@ -64,6 +67,7 @@ class LKVOKernel(nn.Module):
         self.img_size = img_size
         self.fliplr_func = FlipLR(imW=img_size[1], dim_w=3)
         self.vo = DirectVO(imH=img_size[0], imW=img_size[1], pyramid_layer_num=5)
+        self.pose_net = PoseNet(3)
         self.depth_net = VggDepthEstimator(img_size)
         self.pyramid_func = ImagePyramidLayer(chan=1, pyramid_layer_num=5)
         self.smooth_term = smooth_term
@@ -124,7 +128,7 @@ class LKVOKernel(nn.Module):
         mean = kpts_depth.mean()
         return mean
 
-    def forward(self, frames, camparams, kpts, ref_frame_idx, lambda_S=.5, lambda_K=1, do_data_augment=True, use_ssim=True, max_lk_iter_num=10):
+    def forward(self, frames, camparams, kpts, ref_frame_idx, lambda_S=.5, lambda_K=1, do_data_augment=True, use_ssim=True, max_lk_iter_num=10, lk_level=1):
         assert(frames.size(0) == 1 and frames.dim() == 5)
         frames = frames.squeeze(0)
         camparams = camparams.squeeze(0).data
@@ -166,8 +170,17 @@ class LKVOKernel(nn.Module):
         src_inv_depth_pyramid = [depth[src_frame_idx, :, :] for depth in inv_depth_norm_pyramid]
         src_inv_depth0_pyramid = [depth[src_frame_idx, :, :] for depth in inv_depth0_pyramid]
 
-        rot_mat_batch, trans_batch = \
-            self.vo.forward(ref_frame_pyramid, src_frames_pyramid, ref_inv_depth0_pyramid, max_itr_num=max_lk_iter_num)
+        # predict with posenet
+        self.vo.init(ref_frame_pyramid=ref_frame_pyramid, inv_depth_pyramid=ref_inv_depth0_pyramid)
+        p = self.pose_net.forward((frames.view(1, -1, frames.size(2), frames.size(3))-127) / 127)
+        rot_mat_batch = self.vo.twist2mat_batch_func(p[0,:,0:3]).contiguous()
+        trans_batch = p[0,:,3:6].contiguous()#*inv_depth_mean_ten
+        rot_mat_batch, trans_batch = self.vo.update_with_init_pose(src_frames_pyramid[0:lk_level], max_itr_num=max_lk_iter_num, rot_mat_batch=rot_mat_batch, trans_batch=trans_batch)
+
+        # predict with only ddvo
+        # rot_mat_batch, trans_batch = \
+        #     self.vo.forward(ref_frame_pyramid, src_frames_pyramid, ref_inv_depth0_pyramid, max_itr_num=max_lk_iter_num)
+
         #
         # smoothness_cost = self.vo.multi_scale_smoothness_cost(inv_depth_pyramid)
         # smoothness_cost += self.vo.multi_scale_smoothness_cost(inv_depth0_pyramid)
