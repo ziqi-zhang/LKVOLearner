@@ -96,7 +96,7 @@ def main():
                             shuffle=True, num_workers=opt.nThreads, pin_memory=True)
 
     gpu_ids = list(range(torch.cuda.device_count()))
-    
+
 
     lkvolearner = LKVOLearner(img_size=img_size, ref_frame_idx=1, lambda_S=opt.lambda_S,
             lambda_K = opt.lambda_K, gpu_ids = gpu_ids, smooth_term = opt.smooth_term,
@@ -153,7 +153,6 @@ def main():
             # print(inv_depth_pyramid)
             cost.backward()
             optimizer.step()
-
             step_num+=1
 
             if np.mod(step_num, opt.print_freq)==0:
@@ -176,9 +175,8 @@ def main():
             if np.mod(step_num, opt.display_freq)==0:
                 # frame_vis = frames.data[:,1,:,:,:].permute(0,2,3,1).contiguous().view(-1,opt.imW, 3).cpu().numpy().astype(np.uint8)
                 # depth_vis = vis_depthmap(inv_depths.data[:,1,:,:].contiguous().view(-1,opt.imW).cpu()).numpy().astype(np.uint8)
-
                 frame_vis_list = [frame.data.permute(1,2,0).contiguous().cpu().numpy().astype(np.uint8) for frame in frame_list]
-                depth_vis_list = [(vis_depthmap(inv_depths.data.cpu().numpy())*255).astype(np.uint8) for depth in inv_depth_list]
+                depth_vis_list = [(vis_depthmap(depth.data.cpu().numpy())*255).astype(np.uint8) for depth in inv_depth_list]
                 print("Display: photometric_cost {:.3f}, smoothness_cost {:.3f}, cost {:.3f}".format(photometric_cost.data.cpu().item(),
                         smoothness_cost.data.cpu().item(), cost.data.cpu().item()))
                 warp_img_list = [img.cpu().numpy() for img in warp_img_list]

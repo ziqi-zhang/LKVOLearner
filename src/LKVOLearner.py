@@ -74,15 +74,15 @@ class LKVOKernel(nn.Module):
 
     def compute_kpts_diff(self, inv_depth_norm, kpts, trans_batch):
         # only support 3 frames
-        ref_num, _, kpt_num = kpts.shape[:3]
-        assert ref_num == trans_batch.shape[0]
-        inv_depth_norm = inv_depth_norm.unsqueeze(0)
-        inv_depth_batch = torch.cat((inv_depth_norm[:,0], inv_depth_norm[:,1], inv_depth_norm[:,2], inv_depth_norm[:,1]))
+        b, ref_num, _, kpt_num = kpts.shape[:4]
+        h, w = inv_depth_norm.shape[-2:]
+        inv_depth_batch = torch.cat((inv_depth_norm[:,0:1], inv_depth_norm[:,1:2], inv_depth_norm[:,2:3], inv_depth_norm[:,1:2]), dim=1)
         # src1, ref1, src2, ref2
-        kpts = torch.reshape(kpts, (ref_num*2, kpt_num,2)).long()
+        kpts = torch.reshape(kpts, (b, ref_num*2, kpt_num,2)).long()
+        inv_depth_batch = inv_depth_batch.view(b*ref_num*2, h, w)
+        kpts = kpts.view(b*ref_num*2, kpt_num, 2)
         kpts_depth = []
         for i in range(ref_num*2):
-
             depth = inv_depth_batch[i]
             kpt = kpts[i]
             col_select = torch.index_select(depth, 1, kpt[:,0])
@@ -91,6 +91,7 @@ class LKVOKernel(nn.Module):
             # st()
             kpts_depth.append(kpt_depth)
         kpts_depth = torch.stack(kpts_depth)
+        trans_batch = trans_batch.view(b*ref_num, 3)
         for i in range(ref_num):
             kpts_depth[i*2,:]-=trans_batch[i,2]
         diff = []
@@ -98,7 +99,6 @@ class LKVOKernel(nn.Module):
             diff.append((kpts_depth[i*2,:]-kpts_depth[i*2+1,:]).abs())
         diff = torch.stack(diff)
         diff_mean = diff.mean()
-
         return diff_mean
 
     def check_kpts_diff(self, inv_depth_norm, kpts, trans_batch):
@@ -180,24 +180,31 @@ class LKVOKernel(nn.Module):
         for b_idx in range(b):
             single_ref_frame_pyramid = [frame[b_idx,:,:,:] for frame in ref_frame_pyramid]
             single_ref_inv_depth0_pyramid = [depth[b_idx,:,:] for depth in ref_inv_depth0_pyramid]
-            single_ref_inv_depth_pyramid = [depth[b_idx,:,:] for depth in ref_inv_depth_pyramid]
+            # single_ref_inv_depth_pyramid = [depth[b_idx,:,:] for depth in ref_inv_depth_pyramid]
             single_frames = frames[b_idx,:,:,:]
             single_src_frames_pyramid = [frame[b_idx,:,:,:] for frame in src_frames_pyramid]
-            single_inv_depth0_pyramid = [depth[b_idx,:,:] for depth in inv_depth0_pyramid]
-            single_inv_depth_norm_pyramid = [depth[b_idx,:,:] for depth in inv_depth_norm_pyramid]
-            single_src_inv_depth_pyramid = [depth[b_idx,:,:] for depth in src_inv_depth_pyramid]
-            single_src_inv_depth0_pyramid = [depth[b_idx,:,:] for depth in src_inv_depth0_pyramid]
-            single_frames_pyramid = [frame[b_idx,:,:,:] for frame in frames_pyramid]
-            single_kpts = kpts[b_idx]
+            # single_inv_depth0_pyramid = [depth[b_idx,:,:] for depth in inv_depth0_pyramid]
+            # single_inv_depth_norm_pyramid = [depth[b_idx,:,:] for depth in inv_depth_norm_pyramid]
+            # single_src_inv_depth_pyramid = [depth[b_idx,:,:] for depth in src_inv_depth_pyramid]
+            # single_src_inv_depth0_pyramid = [depth[b_idx,:,:] for depth in src_inv_depth0_pyramid]
+            # single_frames_pyramid = [frame[b_idx,:,:,:] for frame in frames_pyramid]
+            # single_kpts = kpts[b_idx]
+            
             # predict with posenet
             self.vo.setCamera(fx=camparams[b_idx][0], cx=camparams[b_idx][2],
                                 fy=camparams[b_idx][4], cy=camparams[b_idx][5])
             self.vo.init(ref_frame_pyramid=single_ref_frame_pyramid, inv_depth_pyramid=single_ref_inv_depth0_pyramid)
             p = self.pose_net.forward((single_frames.view(1, -1, single_frames.size(2), single_frames.size(3))-127) / 127)
-            rot_mat_batch = self.vo.twist2mat_batch_func(p[0,:,0:3]).contiguous()
-            trans_batch = p[0,:,3:6].contiguous()#*inv_depth_mean_ten
-            rot_mat_batch, trans_batch = self.vo.update_with_init_pose(single_src_frames_pyramid[0:lk_level], max_itr_num=max_lk_iter_num, rot_mat_batch=rot_mat_batch, trans_batch=trans_batch)
-
+            rot_mat_single = self.vo.twist2mat_batch_func(p[0,:,0:3]).contiguous()
+            trans_single = p[0,:,3:6].contiguous()#*inv_depth_mean_ten
+            rot_mat_single, trans_single = self.vo.update_with_init_pose(single_src_frames_pyramid[0:lk_level], \
+                                max_itr_num=max_lk_iter_num, rot_mat_batch=rot_mat_single, trans_batch=trans_single)
+            if b_idx==0:
+                rot_mat_batch = rot_mat_single.unsqueeze(0)
+                trans_batch = trans_single.unsqueeze(0)
+            else:
+                rot_mat_batch = torch.cat((rot_mat_batch, rot_mat_single.unsqueeze(0)))
+                trans_batch = torch.cat((trans_batch, trans_single.unsqueeze(0)))
             # predict with only ddvo
             # rot_mat_batch, trans_batch = \
             #     self.vo.forward(ref_frame_pyramid, src_frames_pyramid, ref_inv_depth0_pyramid, max_itr_num=max_lk_iter_num)
@@ -208,43 +215,27 @@ class LKVOKernel(nn.Module):
 
             # smoothness_cost = self.vo.multi_scale_smoothness_cost(inv_depth_pyramid, levels=range(1,5))
             # smoothness_cost = self.vo.multi_scale_smoothness_cost(inv_depth0_pyramid, levels=range(1,5))
-            single_photometric_cost, single_warp_img_save = self.vo.compute_phtometric_loss(self.vo.ref_frame_pyramid, single_src_frames_pyramid, single_ref_inv_depth_pyramid, \
-                                                                    single_src_inv_depth_pyramid, rot_mat_batch, trans_batch, levels=[0,1,2,3], use_ssim=use_ssim)
-            single_smoothness_cost = self.vo.multi_scale_image_aware_smoothness_cost(single_inv_depth0_pyramid, single_frames_pyramid, levels=[2,3], type=self.smooth_term) \
-                                + self.vo.multi_scale_image_aware_smoothness_cost(single_inv_depth_norm_pyramid, single_frames_pyramid, levels=[2,3], type=self.smooth_term)
 
-            single_kpts_cost = self.compute_kpts_diff(single_inv_depth_norm_pyramid[0], single_kpts, trans_batch)
-            # kpts_cost_check = self.check_kpts_diff(inv_depth_norm_pyramid[0], kpts, trans_batch)
-            # print(kpts_cost)
-            # print(kpts_cost_check)
-            # st()
-            # photometric_cost0, reproj_cost0, _, _ = self.vo.compute_phtometric_loss(self.vo.ref_frame_pyramid, src_frames_pyramid, ref_inv_depth0_pyramid, src_inv_depth0_pyramid, rot_mat_batch, trans_batch)
+        photometric_cost, warp_img_save = self.vo.compute_phtometric_loss(ref_frame_pyramid, src_frames_pyramid, ref_inv_depth_pyramid, \
+                                                                src_inv_depth_pyramid, rot_mat_batch, trans_batch, levels=[0,1,2,3], use_ssim=use_ssim)
+        # single_photometric_cost, single_warp_img_save = self.vo.compute_phtometric_loss(self.vo.ref_frame_pyramid, single_src_frames_pyramid, single_ref_inv_depth_pyramid, \
+        #                                                         single_src_inv_depth_pyramid, rot_mat_batch, trans_batch, levels=[0,1,2,3], use_ssim=use_ssim)
+        smoothness_cost = self.vo.multi_scale_image_aware_smoothness_cost(inv_depth0_pyramid, frames_pyramid, levels=[2,3], type=self.smooth_term) \
+                            + self.vo.multi_scale_image_aware_smoothness_cost(inv_depth_norm_pyramid, frames_pyramid, levels=[2,3], type=self.smooth_term)
+        kpts_cost = self.compute_kpts_diff(inv_depth_norm_pyramid[0], kpts, trans_batch)
+        # kpts_cost_check = self.check_kpts_diff(inv_depth_norm_pyramid[0], kpts, trans_batch)
+        # print(kpts_cost)
+        # print(kpts_cost_check)
+        # st()
+        # photometric_cost0, reproj_cost0, _, _ = self.vo.compute_phtometric_loss(self.vo.ref_frame_pyramid, src_frames_pyramid, ref_inv_depth0_pyramid, src_inv_depth0_pyramid, rot_mat_batch, trans_batch)
 
 
-            # cost = photometric_cost + photometric_cost0 + reproj_cost + reproj_cost0 + lambda_S*smoothness_cost
-            single_cost = single_photometric_cost + lambda_S*single_smoothness_cost + lambda_K*single_kpts_cost
+        # cost = photometric_cost + photometric_cost0 + reproj_cost + reproj_cost0 + lambda_S*smoothness_cost
+        cost = photometric_cost + lambda_S*smoothness_cost + lambda_K*kpts_cost
 
-            if b_idx==0:
-                photometric_cost = single_photometric_cost
-                smoothness_cost = single_smoothness_cost
-                kpts_cost = single_kpts_cost
-                cost = single_cost
-                frame_save = [single_src_frames_pyramid[0][i] for i in range(0,ref_frame_idx)]+ \
-                             [self.vo.ref_frame_pyramid[0]] + \
-                             [single_src_frames_pyramid[0][i-1] for i in range(ref_frame_idx+1,bundle_size)]
-                depth_save = [single_src_inv_depth0_pyramid[0][i]*inv_depth_mean_ten[b_idx] for i in range(0,ref_frame_idx)] + \
-                             [single_ref_inv_depth0_pyramid[0]*inv_depth_mean_ten[b_idx]] + \
-                             [single_src_inv_depth0_pyramid[0][i-1]*inv_depth_mean_ten[b_idx] for i in range(ref_frame_idx+1,bundle_size)]
-                warp_img_save = single_warp_img_save
-            else:
-                photometric_cost += single_photometric_cost
-                smoothness_cost += single_smoothness_cost
-                kpts_cost += single_kpts_cost
-                cost += single_cost
+        frame_save = [frames[0][i] for i in range(3)]
+        depth_save = [inv_depth0_pyramid[0][0][i] for i in range(3)]
 
-        cost /= b
-        smoothness_cost /= b
-        kpts_cost /= b
         return cost, photometric_cost, smoothness_cost, kpts_cost, \
                 inv_depth0_pyramid[0].view(b*bundle_size, h, w)*inv_depth_mean_ten.unsqueeze(-1).unsqueeze(-1), \
                 frame_save, depth_save, warp_img_save
