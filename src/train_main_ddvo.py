@@ -95,8 +95,8 @@ def main():
     dataloader = DataLoader(dataset, batch_size=opt.batchSize,
                             shuffle=True, num_workers=opt.nThreads, pin_memory=True)
 
-    gpu_ids = list(range(opt.batchSize))
-
+    gpu_ids = list(range(torch.cuda.device_count()))
+    
 
     lkvolearner = LKVOLearner(img_size=img_size, ref_frame_idx=1, lambda_S=opt.lambda_S,
             lambda_K = opt.lambda_K, gpu_ids = gpu_ids, smooth_term = opt.smooth_term,
