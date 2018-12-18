@@ -177,6 +177,21 @@ class LKVOKernel(nn.Module):
         src_inv_depth_pyramid = [depth[:, src_frame_idx, :, :] for depth in inv_depth_norm_pyramid]
         src_inv_depth0_pyramid = [depth[:, src_frame_idx, :, :] for depth in inv_depth0_pyramid]
 
+        self.vo.setCamera(fx=camparams[:,0:1], cx=camparams[:,2:3],
+                            fy=camparams[:,4:5], cy=camparams[:,5:6])
+        self.vo.init(ref_frame_pyramid=ref_frame_pyramid, inv_depth_pyramid=ref_inv_depth0_pyramid)
+        p_batch = []
+        for b_idx in range(b):
+            single_frames = frames[b_idx,:,:,:]
+            p = self.pose_net.forward((single_frames.view(1, -1, single_frames.size(2), single_frames.size(3))-127) / 127)
+            p_batch.append(p)
+        p =  torch.stack(p_batch).contiguous().squeeze(1)
+        rot_mat = self.vo.twist2mat_batch_func(p[:,:,0:3]).contiguous()
+        trans = p[:,:,3:6].contiguous()
+        rot_mat, trans = self.vo.update_with_init_pose(src_frames_pyramid[0:lk_level], \
+                            max_itr_num=max_lk_iter_num, rot_mat_batch=rot_mat, trans_batch=trans)
+        st()
+
         for b_idx in range(b):
             single_ref_frame_pyramid = [frame[b_idx,:,:,:] for frame in ref_frame_pyramid]
             single_ref_inv_depth0_pyramid = [depth[b_idx,:,:] for depth in ref_inv_depth0_pyramid]
@@ -189,7 +204,7 @@ class LKVOKernel(nn.Module):
             # single_src_inv_depth0_pyramid = [depth[b_idx,:,:] for depth in src_inv_depth0_pyramid]
             # single_frames_pyramid = [frame[b_idx,:,:,:] for frame in frames_pyramid]
             # single_kpts = kpts[b_idx]
-            
+
             # predict with posenet
             self.vo.setCamera(fx=camparams[b_idx][0], cx=camparams[b_idx][2],
                                 fy=camparams[b_idx][4], cy=camparams[b_idx][5])

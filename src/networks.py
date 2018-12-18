@@ -5,7 +5,7 @@ import functools
 from torch.autograd import Variable
 import numpy as np
 
-from pdb import set_trace
+from pdb import set_trace as st
 
 DISP_SCALING = 10
 MIN_DISP = 0.01

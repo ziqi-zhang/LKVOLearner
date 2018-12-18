@@ -6,7 +6,7 @@ from torch import optim
 from torch.nn import AvgPool2d
 from ImagePyramid import ImagePyramidLayer
 from BilinearSampling import grid_bilinear_sampling
-from MatInverse import inv
+from MatInverse import inv, inv_batch
 import os
 from pdb import set_trace as st
 
@@ -22,10 +22,10 @@ IMG_CHAN = 3
 # helper functions
 
 def meshgrid(x, y):
-    imW = x.size(0)
-    imH = y.size(0)
-    X = x.unsqueeze(0).repeat(imH, 1)
-    Y = y.unsqueeze(1).repeat(1, imW)
+    imW = x.size(1)
+    imH = y.size(1)
+    X = x.unsqueeze(1).repeat(1, imH, 1)
+    Y = y.unsqueeze(2).repeat(1, 1, imW)
     return X, Y
 
 def inv_rigid_transformation(rot_mat_batch, trans_batch):
@@ -84,19 +84,22 @@ class GradientLayer(nn.Module):
         self.pady_func = torch.nn.ReplicationPad2d((0,0,1,1))
 
     def forward(self, img):
-        img_ = img.unsqueeze(1)
+        b, bundle_size, h, w = img.shape
+        # img_ = img.unsqueeze(1)
+        img_ = img.contiguous().view(b*bundle_size, 1, h, w)
         img_padx = self.padx_func(img_)
         img_dx = torch.nn.functional.conv2d(input=img_padx,
                         weight=Variable(self.wx),
                         stride=1,
-                        padding=0).squeeze(1)
+                        padding=0)
 
         img_pady = self.pady_func(img_)
         img_dy = torch.nn.functional.conv2d(input=img_pady,
                         weight=Variable(self.wy),
                         stride=1,
-                        padding=0).squeeze(1)
-
+                        padding=0)
+        img_dx = img_dx.view(b, bundle_size, h, w)
+        img_dy = img_dy.view(b, bundle_size, h, w)
         return img_dx, img_dy
 
 
@@ -107,21 +110,24 @@ class Twist2Mat(nn.Module):
         self.register_buffer('E', torch.eye(3))
 
     def cprodmat_batch(self, a_batch):
-        batch_size, _ = a_batch.size()
-        o = Variable(self.o).expand(batch_size, 1)
-        a0 = a_batch[:, 0:1]
-        a1 = a_batch[:, 1:2]
-        a2 = a_batch[:, 2:3]
-        return torch.cat((o, -a2, a1, a2, o, -a0, -a1, a0, o), 1).view(batch_size, 3, 3)
+        batch_size, ref_size, _ = a_batch.size()
+        o = Variable(self.o).expand(batch_size, ref_size, 1)
+        a0 = a_batch[:, :, 0:1]
+        a1 = a_batch[:, :, 1:2]
+        a2 = a_batch[:, :, 2:3]
+        return torch.cat((o, -a2, a1, a2, o, -a0, -a1, a0, o), 2).view(batch_size, ref_size, 3, 3)
 
     def forward(self, twist_batch):
-        batch_size, _ = twist_batch.size()
-        rot_angle = twist_batch.norm(p=2, dim=1).view(batch_size, 1).clamp(min=1e-5)
-        rot_axis = twist_batch / rot_angle.expand(batch_size, 3)
+        batch_size, ref_size, _ = twist_batch.size()
+        rot_angle = twist_batch.norm(p=2, dim=2).view(batch_size, ref_size, 1).clamp(min=1e-5)
+        rot_axis = twist_batch / rot_angle.expand(batch_size, ref_size, 3)
         A = self.cprodmat_batch(rot_axis)
-        return Variable(self.E).view(1, 3, 3).expand(batch_size, 3, 3)\
-            + A*rot_angle.sin().view(batch_size, 1, 1).expand(batch_size, 3, 3)\
-            + A.bmm(A)*((1-rot_angle.cos()).view(batch_size, 1, 1).expand(batch_size, 3, 3))
+        A = A.view(batch_size*ref_size, 3, 3)
+        res = Variable(self.E).view(1, 3, 3).expand(batch_size*ref_size, 3, 3)\
+            + A*rot_angle.sin().view(batch_size*ref_size, 1, 1).expand(batch_size*ref_size, 3, 3)\
+            + A.bmm(A)*((1-rot_angle.cos()).view(batch_size*ref_size, 1, 1).expand(batch_size*ref_size, 3, 3))
+        res = res.view(batch_size, ref_size, 3, 3)
+        return res
 
 def compute_img_stats(img):
     # img_pad = torch.nn.ReplicationPad2d(1)(img)
@@ -249,7 +255,7 @@ class DirectVO(nn.Module):
 
 
     def init(self, ref_frame_pyramid, inv_depth_pyramid):
-        # ref_frame 3 * H * W
+        # batch_size * ref_frame 3 * H * W
         assert(self.pyramid_layer_num == len(inv_depth_pyramid))
         self.inv_depth_pyramid = inv_depth_pyramid
         # self.ref_frame_pyramid = self.pyramid_func(ref_frame)
@@ -272,21 +278,31 @@ class DirectVO(nn.Module):
         self.invH_dIdp_pyramid = []
 
         for i in range(self.pyramid_layer_num):
-            _, h, w = self.ref_frame_pyramid[i].size()
+            b, _, h, w = self.ref_frame_pyramid[i].size()
 
-            x = (Variable(getattr(self, 'x_'+str(i))) - self.camparams['cx']) / self.camparams['fx']
-            y = (Variable(getattr(self, 'y_'+str(i))) - self.camparams['cy']) / self.camparams['fy']
+            x = getattr(self, 'x_'+str(i))
+            y = getattr(self, 'y_'+str(i))
+
+            x = x.unsqueeze(0).repeat(b, 1)
+            y = y.unsqueeze(0).repeat(b, 1)
+            x = (x - self.camparams['cx']) / self.camparams['fx']
+            y = (y - self.camparams['cy']) / self.camparams['fy']
+
+            # old_x = (Variable(getattr(self, 'x_'+str(i))) - self.camparams['cx']) / self.camparams['fx']
+            # old_y = (Variable(getattr(self, 'y_'+str(i))) - self.camparams['cy']) / self.camparams['fy']
 
             X, Y = meshgrid(x, y)
-            xy = torch.cat((X.view(1, X.numel()),
-                            Y.view(1, Y.numel())), 0)
+            xy = torch.cat((X.view(b, X[0].numel()).unsqueeze(1),
+                            Y.view(b, Y[0].numel()).unsqueeze(1)), 1)
             self.xy_pyramid.append(xy)
 
             # compute image gradient
             imgrad_x, imgrad_y = self.img_gradient_func(self.ref_frame_pyramid[i])
 
-            self.ref_imgrad_x_pyramid.append(imgrad_x*(self.camparams['fx']/2**i))
-            self.ref_imgrad_y_pyramid.append(imgrad_y*(self.camparams['fy']/2**i))
+            fx = (self.camparams['fx']/2**i).view(b, 1, 1, 1)
+            fy = (self.camparams['fy']/2**i).view(b, 1, 1, 1)
+            self.ref_imgrad_x_pyramid.append(imgrad_x*fx)
+            self.ref_imgrad_y_pyramid.append(imgrad_y*fy)
 
             # precompute terms for LK regress
             dIdp = self.compute_dIdp(self.ref_imgrad_x_pyramid[i],
@@ -294,10 +310,12 @@ class DirectVO(nn.Module):
                                      self.inv_depth_pyramid[i],
                                      self.xy_pyramid[i])
             self.dIdp_pyramid.append(dIdp)
-            invH = inv(dIdp.t().mm(dIdp))
+            # invH = inv(dIdp.t().mm(dIdp))
+            invH = dIdp.transpose(1,2).bmm(dIdp)
+            invH = inv_batch(invH)
             self.invH_pyramid.append(invH)
             # self.invH_dIdp_pyramid.append(self.invH_pyramid[-1].mm(dIdp.t()))
-            self.invH_dIdp_pyramid.append(invH.mm(dIdp.t()))
+            self.invH_dIdp_pyramid.append(invH.bmm(dIdp.transpose(1,2)))
 
     def init_xy_pyramid(self, ref_frames_pyramid):
         # self.inv_depth_pyramid, self.x_pyramid, self.y_pyramid = buildImagePyramid(inv_depth, self.pyramid_layer_num)
@@ -319,23 +337,23 @@ class DirectVO(nn.Module):
 
 
     def compute_dIdp(self, imgrad_x, imgrad_y, inv_depth, xy):
-        k, h, w = imgrad_x.size()
-        _, pt_num = xy.size()
+        b, k, h, w = imgrad_x.size()
+        b, _, pt_num = xy.size()
         assert(h*w == pt_num)
         feat_dim = pt_num*k
-        x = xy[0, :].view(pt_num, 1)
-        y = xy[1, :].view(pt_num, 1)
+        x = xy[:, 0, :].view(b, pt_num, 1)
+        y = xy[:, 1, :].view(b, pt_num, 1)
         xty = x * y
-        O = Variable(self.o).expand(pt_num, 1)
-        inv_depth_ = inv_depth.view(pt_num, 1)
-        dxdp = torch.cat((-xty, 1 + x ** 2, -y, inv_depth_, O, -inv_depth_.mul(x)), 1)
-        dydp = torch.cat((-1 - y ** 2, xty, x, O, inv_depth_, -inv_depth_.mul(y)), 1)
+        O = Variable(self.o).expand(b, pt_num, 1)
+        inv_depth_ = inv_depth.view(b, pt_num, 1)
 
-        imgrad_x_ = imgrad_x.view(feat_dim, 1).expand(feat_dim, 6)
-        imgrad_y_ = imgrad_y.view(feat_dim, 1).expand(feat_dim, 6)
+        dxdp = torch.cat((-xty, 1 + x ** 2, -y, inv_depth_, O, -inv_depth_.mul(x)), 2)
+        dydp = torch.cat((-1 - y ** 2, xty, x, O, inv_depth_, -inv_depth_.mul(y)), 2)
 
-        dIdp = imgrad_x_.mul(dxdp.repeat(k, 1)) + \
-            imgrad_y_.mul(dydp.repeat(k, 1))
+        imgrad_x_ = imgrad_x.view(b, feat_dim, 1).expand(b, feat_dim, 6)
+        imgrad_y_ = imgrad_y.view(b, feat_dim, 1).expand(b, feat_dim, 6)
+        dIdp = imgrad_x_.mul(dxdp.repeat(1, k, 1)) + \
+            imgrad_y_.mul(dydp.repeat(1, k, 1))
         return dIdp
 
 
@@ -357,14 +375,21 @@ class DirectVO(nn.Module):
 
 
     def warp_batch_func(self, img_batch, inv_depth, level_idx, R_batch, t_batch):
-        batch_size, k, h, w = img_batch.size()
+        b, ref_size, k, h, w = img_batch.size()
         xy = self.xy_pyramid[level_idx]
-        _, N = xy.size()
+        _, _, N = xy.size()
+        batch_size = b*ref_size
+        R_batch = R_batch.view(batch_size, 3, 3)
+        t_batch = t_batch.view(batch_size, 3)
+        xy = xy.view(batch_size, N)
+        st()
         # xyz = R_batch.bmm(torch.cat((xy.view(1, 2, N).expand(batch_size, 2, N), Variable(self.load_to_device(torch.ones(batch_size, 1, N)))), 1)) \
         #     + t_batch.view(batch_size, 3, 1).expand(batch_size, 3, N) * inv_depth.view(1, 1, N).expand(batch_size, 3, N)
-        xyz = R_batch[:, :, 0:2].bmm(xy.view(1, 2, N).expand(batch_size, 2, N))\
+        batch_inv_depth = inv_depth.view(b, 1, N).expand(b, ref_size, N)
+        batch_inv_depth = batch_inv_depth.contiguous().view(batch_size, 1, N).expand(batch_size, 3, N)
+        xyz = R_batch[:, :, 0:2].bmm(xy.expand(batch_size, 2, N))\
             + R_batch[:, :, 2:3].expand(batch_size, 3, N)\
-            + t_batch.view(batch_size, 3, 1).expand(batch_size, 3, N) * inv_depth.view(-1, 1, N).expand(batch_size, 3, N)
+            + t_batch.view(batch_size, 3, 1).expand(batch_size, 3, N) * batch_inv_depth
         z = xyz[:, 2:3, :].clamp(min=1e-10)
         xy_warp = xyz[:, 0:2, :] / z.expand(batch_size, 2, N)
         # u_warp = ((xy_warp[:, 0, :]*self.camparams['fx'] + self.camparams['cx'])/2**level_idx - .5).view(batch_size, N)
@@ -623,7 +648,7 @@ class DirectVO(nn.Module):
         return rot_mat_batch, trans_batch, frames_pyramid
 
     def update_with_init_pose(self, frames_pyramid, rot_mat_batch, trans_batch, max_itr_num=10):
-        frame_num, k, h, w = frames_pyramid[0].size()
+        batch_size, frame_num, k, h, w = frames_pyramid[0].size()
         trans_batch_prev = trans_batch
         rot_mat_batch_prev = rot_mat_batch
 
@@ -633,12 +658,12 @@ class DirectVO(nn.Module):
         cur_time = timer()
 
         for level_idx in range(len(frames_pyramid)-1, -1, -1):
-
-            max_photometric_cost = self.o.squeeze().expand(frame_num)+10000
+            max_photometric_cost = self.o.expand(batch_size, frame_num)+10000
             # print(level_idx)
             for i in range(max_itr_num):
                 # print(i)
                 # cur_time = timer()
+
                 pixel_warp, in_view_mask = self.warp_batch(frames_pyramid[level_idx], level_idx, rot_mat_batch, trans_batch)
                 # t_warp += timer()-cur_time
 

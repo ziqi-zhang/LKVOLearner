@@ -4,6 +4,8 @@ from torch.autograd import Variable
 from timeit import default_timer as timer
 from torch.autograd import gradcheck
 
+from pdb import set_trace as st
+
 class Inverse(torch.autograd.Function):
 
     def forward(self, input):
@@ -62,9 +64,23 @@ class InverseBatch(torch.autograd.Function):
 def inv_batch(input):
     return InverseBatch()(input)
 
+def test_inv_batch():
+    W = torch.rand(3,2,2)
+    W.requires_grad=True
+    print("inv")
+    for i in range(3):
+        inv_ = inv(W[i])
+        print(inv_)
+    b_inv = inv_batch(W)
+    print("batch inv")
+    for i in range(3):
+        print(b_inv[i])
+    c = b_inv.mean()
+    print(c)
+    test = gradcheck(b_inv, W, eps=1e-5, atol=1e-4)
+    print(test)
 
-if __name__ == "__main__":
-
+def test_inv():
     W = torch.rand(2,2)
     s = timer()
     invH = inv(Variable(W, requires_grad=True))
@@ -75,3 +91,6 @@ if __name__ == "__main__":
     print(timer()-s)
     test = gradcheck(inv, (Variable(W, requires_grad=True),), eps=1e-5, atol=1e-4)
     print(test)
+
+if __name__ == "__main__":
+    test_inv_batch()
