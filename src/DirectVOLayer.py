@@ -175,14 +175,13 @@ def compute_photometric_cost_norm(img_diff, mask):
     # k = img_diff.size(1)
     # batch_size = img_diff.size(0)
     # mask_ = mask.view(batch_size, 1, -1).expand_as(img_diff)
-
-    cost = img_diff.abs().sum(1) * mask
+    cost = img_diff.abs().sum(2) * mask
     # cost = img_diff.abs() * mask_
-    num_in_view = mask.sum(1)
+    num_in_view = mask.sum(-1)
     # cost_norm = cost.contiguous().sum() / (num_in_view+1e-10)
-    cost_norm = cost.sum(1) / (num_in_view+1e-10)
+    cost_norm = cost.sum(-1) / (num_in_view+1e-10)
     # print(mask.size())
-    return cost_norm * (1 / 127.5), (num_in_view / mask.size(1)).min()
+    return cost_norm * (1 / 127.5), (num_in_view / mask.size(2)).min()
 
 
 def gradient(input, do_normalize=False):
@@ -359,16 +358,19 @@ class DirectVO(nn.Module):
 
 
     def LKregress(self, invH_dIdp, mask, It):
-        batch_size, pt_num = mask.size()
-        _, k, _ = It.size()
+        b, ref_num, pt_num = mask.size()
+        _, _, k, _ = It.size()
         feat_dim = k*pt_num
-        invH_dIdp_ = invH_dIdp.view(1, 6, feat_dim).expand(batch_size, 6, feat_dim)
-        mask_ = mask.view(batch_size, 1, pt_num).expand(batch_size, k, pt_num)
+        invH_dIdp_ = invH_dIdp.view(b, 1, 6, feat_dim).expand(b, ref_num, 6, feat_dim)
+        mask_ = mask.view(b, ref_num, 1, pt_num).expand(b, ref_num, k, pt_num)
         # huber_weights = ((255*.2) / (It.abs()+1e-5)).clamp(max=1)
         # huber_weights = Variable(huber_weights.data)
         # dp = invH_dIdp_.bmm((mask_* huber_weights * It).view(batch_size, feat_dim, 1))
-        dp = invH_dIdp_.bmm((mask_ * It).view(batch_size, feat_dim, 1))
-        return dp.view(batch_size, 6)
+        invH_dIdp_ = invH_dIdp_.contiguous().view(b*ref_num, 6, feat_dim)
+        masked_It = mask_ * It
+        masked_It = masked_It.view(b*ref_num, k, pt_num)
+        dp = invH_dIdp_.bmm(masked_It.view(b*ref_num, feat_dim, 1))
+        return dp.view(b, ref_num, 6)
 
     def warp_batch(self, img_batch, level_idx, R_batch, t_batch):
         return self.warp_batch_func(img_batch, self.inv_depth_pyramid[level_idx], level_idx, R_batch, t_batch)
@@ -386,6 +388,34 @@ class DirectVO(nn.Module):
         #     + t_batch.view(batch_size, 3, 1).expand(batch_size, 3, N) * inv_depth.view(1, 1, N).expand(batch_size, 3, N)
         batch_inv_depth = inv_depth.view(b, 1, N).expand(b, ref_size, N)
         batch_inv_depth = batch_inv_depth.contiguous().view(batch_size, 1, N).expand(batch_size, 3, N)
+        xyz = R_batch[:, :, 0:2].bmm(xy)\
+            + R_batch[:, :, 2:3].expand(batch_size, 3, N)\
+            + t_batch.contiguous().view(batch_size, 3, 1).expand(batch_size, 3, N) * batch_inv_depth
+        z = xyz[:, 2:3, :].clamp(min=1e-10)
+        xy_warp = xyz[:, 0:2, :] / z.expand(batch_size, 2, N)
+        # u_warp = ((xy_warp[:, 0, :]*self.camparams['fx'] + self.camparams['cx'])/2**level_idx - .5).view(batch_size, N)
+        # v_warp = ((xy_warp[:, 1, :]*self.camparams['fy'] + self.camparams['cy'])/2**level_idx - .5).view(batch_size, N)
+        # print(self.x_pyramid[level_idx][0])
+        xy_warp = xy_warp.view(b, ref_size, 2, N)
+        u_warp = ((xy_warp[:, :, 0, :] * self.camparams['fx'].view(b,1,1) + self.camparams['cx'].view(b,1,1)) - \
+                    getattr(self, 'x_'+str(level_idx))[0]).view(b, ref_size, N) / 2 ** level_idx
+        v_warp = ((xy_warp[:, :, 1, :] * self.camparams['fy'].view(b,1,1) + self.camparams['cy'].view(b,1,1)) - \
+                    getattr(self, 'y_'+str(level_idx))[0]).view(b, ref_size, N) / 2 ** level_idx
+
+        Q, in_view_mask =  grid_bilinear_sampling(img_batch, u_warp, v_warp)
+        return Q, in_view_mask * (z.view_as(in_view_mask)>1e-10).float()
+
+    def warp_batch_func_photo_error(self, img_batch, inv_depth, level_idx, R_batch, t_batch):
+        b, ref_size, k, h, w = img_batch.size()
+        xy = self.xy_pyramid[level_idx]
+        _, _, N = xy.size()
+        batch_size = b*ref_size
+        R_batch = R_batch.view(batch_size, 3, 3)
+        t_batch = t_batch.view(batch_size, 3)
+        xy = xy.view(b, 1, 2, N).expand(b, ref_size, 2, N).contiguous().view(batch_size, 2, N)
+        # xyz = R_batch.bmm(torch.cat((xy.view(1, 2, N).expand(batch_size, 2, N), Variable(self.load_to_device(torch.ones(batch_size, 1, N)))), 1)) \
+        #     + t_batch.view(batch_size, 3, 1).expand(batch_size, 3, N) * inv_depth.view(1, 1, N).expand(batch_size, 3, N)
+        batch_inv_depth = inv_depth.contiguous().view(batch_size, 1, N).expand(batch_size, 3, N)
         xyz = R_batch[:, :, 0:2].bmm(xy)
         xyz += R_batch[:, :, 2:3].expand(batch_size, 3, N)
         xyz += t_batch.contiguous().view(batch_size, 3, 1).expand(batch_size, 3, N) * batch_inv_depth
@@ -407,6 +437,7 @@ class DirectVO(nn.Module):
         return Q, in_view_mask * (z.view_as(in_view_mask)>1e-10).float()
 
 
+
     def compute_phtometric_loss(self, ref_frames_pyramid, src_frames_pyramid, ref_inv_depth_pyramid, src_inv_depth_pyramid,
                                 rot_mat_batch, trans_batch,
                                 use_ssim=True, levels=None,
@@ -414,9 +445,15 @@ class DirectVO(nn.Module):
                                 src_expl_mask_pyramid=None):
         b = rot_mat_batch.size(0)
         bundle_size = rot_mat_batch.size(1)+1
+
         rot_mat_batch = rot_mat_batch.view(b*(bundle_size-1), 3, 3)
         trans_batch = trans_batch.view(b*(bundle_size-1), 3)
         inv_rot_mat_batch, inv_trans_batch = inv_rigid_transformation(rot_mat_batch, trans_batch)
+        inv_rot_mat_batch = inv_rot_mat_batch.contiguous().view(b, bundle_size-1, 3, 3)
+        inv_trans_batch = inv_trans_batch.contiguous().view(b, bundle_size-1, 3)
+        rot_mat_batch = rot_mat_batch.view(b, bundle_size-1, 3, 3)
+        trans_batch = trans_batch.view(b, bundle_size-1, 3)
+
         src_pyramid = []
         ref_pyramid = []
         depth_pyramid = []
@@ -441,22 +478,23 @@ class DirectVO(nn.Module):
             ref_depth = ref_inv_depth_pyramid[level_idx].unsqueeze(1).repeat(1, bundle_size-1, 1, 1)
             src_depth = src_inv_depth_pyramid[level_idx]
             h, w = ref_frame.shape[-2:]
-            ref_frame = ref_frame.view(b*(bundle_size-1), 3, h, w)
-            src_frame = src_frame.view(b*(bundle_size-1), 3, h, w)
-            ref_depth = ref_depth.view(b*(bundle_size-1), h, w)
-            src_depth = src_depth.view(b*(bundle_size-1), h, w)
+            # ref_frame = ref_frame.view(b*(bundle_size-1), 3, h, w)
+            # src_frame = src_frame.view(b*(bundle_size-1), 3, h, w)
+            # ref_depth = ref_depth.view(b*(bundle_size-1), h, w)
+            # src_depth = src_depth.view(b*(bundle_size-1), h, w)
             # print(src_depth.size())
+
             ref_pyramid.append(torch.cat((ref_frame,
-                                    src_frame), 0)/127.5)
+                                    src_frame), 1)/127.5)
             src_pyramid.append(torch.cat((src_frame,
-                                    ref_frame), 0)/127.5)
+                                    ref_frame), 1)/127.5)
             depth_pyramid.append(torch.cat((ref_depth,
-                                    src_depth), 0))
+                                    src_depth), 1))
 
         rot_mat = torch.cat((rot_mat_batch,
-                            inv_rot_mat_batch) ,0)
+                            inv_rot_mat_batch) ,1)
         trans = torch.cat((trans_batch,
-                           inv_trans_batch), 0)
+                           inv_trans_batch), 1)
 
         loss = 0
 
@@ -467,34 +505,41 @@ class DirectVO(nn.Module):
         # for level_idx in range(3):
         for level_idx in levels:
             # print(depth_pyramid[level_idx].size())
-            _, h, w = depth_pyramid[level_idx].size()
-            warp_img, in_view_mask = self.warp_batch_func(
+            b, _, h, w = depth_pyramid[level_idx].size()
+
+            warp_img, in_view_mask = self.warp_batch_func_photo_error(
                     src_pyramid[level_idx],
                     depth_pyramid[level_idx],
                     level_idx, rot_mat, trans)
-            warp_img = warp_img.view((bundle_size-1)*2*b, IMG_CHAN, h, w)
+
             # warp_img_save is the warped img from src to ref with full size
+
+            warp_img = warp_img.view(b, 2*(bundle_size-1), IMG_CHAN, h, w)
+            in_view_mask = in_view_mask.view(b, 2*(bundle_size-1), h, w)
 
             if level_idx==0:
                 split_idx = b*(bundle_size-1)
-                warp_img_save = [warp_img[split_idx:split_idx+1], warp_img[0:2], warp_img[split_idx+1:split_idx+2]]
+                warp_img_save = [warp_img[0][2:3], warp_img[0][0:2], warp_img[0][3:4]]
             if use_expl_mask:
                 mask = in_view_mask.view(-1,h,w)*expl_mask_pyramid[level_idx]
             else:
                 mask = in_view_mask
-            mask_expand = mask.view((bundle_size-1)*2*b, 1, h, w).expand((bundle_size-1)*2*b, IMG_CHAN, h, w)
+            mask_expand = mask.view(b, (bundle_size-1)*2, 1, h, w).expand(b, (bundle_size-1)*2, IMG_CHAN, h, w)
             rgb_loss = ((ref_pyramid[level_idx] - warp_img).abs()*mask_expand).mean()
             if use_ssim and level_idx<1:
                 # print("compute ssim loss------")
-                warp_mu, warp_sigma = compute_img_stats(warp_img)
-                ref_mu, ref_sigma = compute_img_stats(ref_pyramid[level_idx])
-                ssim = compute_SSIM(ref_pyramid[level_idx],
+                warp_img_bundle = warp_img.view(b*2*(bundle_size-1), IMG_CHAN, h, w)
+                ref_bundle = ref_pyramid[level_idx].view(b*2*(bundle_size-1), IMG_CHAN, h, w)
+                mask_bundle = mask_expand.view(b*2*(bundle_size-1), IMG_CHAN, h, w)
+                warp_mu, warp_sigma = compute_img_stats(warp_img_bundle)
+                ref_mu, ref_sigma = compute_img_stats(ref_bundle)
+                ssim = compute_SSIM(ref_bundle,
                                 ref_mu,
                                 ref_sigma,
-                                warp_img,
+                                warp_img_bundle,
                                 warp_mu,
                                 warp_sigma)
-                ssim_loss = (ssim*mask_expand[:,:,1:-1,1:-1]).mean()
+                ssim_loss = (ssim*mask_bundle[:,:,1:-1,1:-1]).mean()
                 loss += .85*ssim_loss+.15*rgb_loss
             else:
                 loss += rgb_loss
@@ -623,8 +668,8 @@ class DirectVO(nn.Module):
                     dp = self.LKregress(invH_dIdp=self.invH_dIdp_pyramid[level_idx],
                                         mask=in_view_mask,
                                         It=temporal_grad)
-
-                    d_rot_mat_batch = self.twist2mat_batch_func(-dp[:, 0:3])
+                    st()
+                    d_rot_mat_batch = self.twist2mat_batch_func(-dp[:, :, 0:3])
                     trans_batch_new = d_rot_mat_batch.bmm(trans_batch.view(frame_num, 3, 1)).view(frame_num, 3) - dp[:, 3:6]
                     rot_mat_batch_new = d_rot_mat_batch.bmm(rot_mat_batch)
 
@@ -668,49 +713,52 @@ class DirectVO(nn.Module):
                 # cur_time = timer()
 
                 pixel_warp, in_view_mask = self.warp_batch(frames_pyramid[level_idx], level_idx, rot_mat_batch, trans_batch)
-                if level_idx==4 and i==0:
-                    print(pixel_warp)
                 # t_warp += timer()-cur_time
-
-                temporal_grad = pixel_warp - self.ref_frame_pyramid[level_idx].view(3, -1).unsqueeze(0).expand_as(pixel_warp)
-
+                temporal_grad = pixel_warp - self.ref_frame_pyramid[level_idx].view(batch_size, 3, -1).unsqueeze(1).expand_as(pixel_warp)
                 photometric_cost, min_perc_in_view = compute_photometric_cost_norm(temporal_grad.data, in_view_mask.data)
 
                 if min_perc_in_view < .5:
                     break
 
                 if (photometric_cost < max_photometric_cost).max()>0:
-
                     trans_batch_prev = trans_batch
                     rot_mat_batch_prev = rot_mat_batch
-
                     dp = self.LKregress(invH_dIdp=self.invH_dIdp_pyramid[level_idx],
                                         mask=in_view_mask,
                                         It=temporal_grad)
 
                     # d_rot_mat_batch = self.twist2mat_batch_func(-dp[:, 0:3])
-                    d_rot_mat_batch = self.twist2mat_batch_func(dp[:, 0:3]).transpose(1,2)
-                    trans_batch_new = d_rot_mat_batch.bmm(trans_batch.view(frame_num, 3, 1)).view(frame_num, 3) - dp[:, 3:6]
+                    d_rot_mat_batch = self.twist2mat_batch_func(dp[:, :, 0:3]).transpose(2,3)
+                    d_rot_mat_batch = d_rot_mat_batch.view(batch_size*frame_num, 3, 3)
+                    trans_batch = trans_batch.view(batch_size*frame_num, 3, 1)
+                    rot_mat_batch = rot_mat_batch.view(batch_size*frame_num, 3, 3)
+
+                    trans_batch_new = d_rot_mat_batch.bmm(trans_batch).view(batch_size, frame_num, 3) - dp[:, :, 3:6]
                     rot_mat_batch_new = d_rot_mat_batch.bmm(rot_mat_batch)
+
+                    trans_batch_new = trans_batch_new.view(batch_size, frame_num, 3, 1)
+                    rot_mat_batch_new = rot_mat_batch_new.view(batch_size, frame_num, 3, 3)
+                    trans_batch = trans_batch.view(batch_size, frame_num, 3, 1)
+                    rot_mat_batch = rot_mat_batch.view(batch_size, frame_num, 3, 3)
 
                     trans_list = []
                     rot_list = []
                     # print(photometric_cost)
-                    for k in range(frame_num):
-                        if photometric_cost[k] < max_photometric_cost[k]:
-                            rot_list.append(rot_mat_batch_new[k:k+1, :, :])
-                            trans_list.append(trans_batch_new[k:k+1, :])
-                            max_photometric_cost[k] = photometric_cost[k]
-                        else:
-                            rot_list.append(rot_mat_batch[k:k+1, :, :])
-                            trans_list.append(trans_batch[k:k+1, :])
-                    rot_mat_batch = torch.cat(rot_list, 0)
-                    trans_batch = torch.cat(trans_list, 0)
+                    for bk in range(batch_size):
+                        for k in range(frame_num):
+                            if photometric_cost[bk][k] < max_photometric_cost[bk][k]:
+                                rot_list.append(rot_mat_batch_new[bk:bk+1, k:k+1, :, :])
+                                trans_list.append(trans_batch_new[bk:bk+1, k:k+1, :])
+                                max_photometric_cost[bk][k] = photometric_cost[bk][k]
+                            else:
+                                rot_list.append(rot_mat_batch[bk:bk+1, k:k+1, :, :])
+                                trans_list.append(trans_batch[bk:bk+1, k:k+1, :])
+                    rot_mat_batch = torch.cat(rot_list, 0).view(batch_size, frame_num, 3, 3)
+                    trans_batch = torch.cat(trans_list, 0).view(batch_size, frame_num, 3)
                 else:
                     break
             rot_mat_batch = rot_mat_batch_prev
             trans_batch = trans_batch_prev
-
         return rot_mat_batch, trans_batch
 
 

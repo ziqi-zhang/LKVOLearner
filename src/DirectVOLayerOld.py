@@ -4,8 +4,8 @@ import torch.nn as nn
 from torch.autograd import Variable
 from torch import optim
 from torch.nn import AvgPool2d
-from ImagePyramid import ImagePyramidLayer
-from BilinearSampling import grid_bilinear_sampling
+from ImagePyramidOld import ImagePyramidLayer
+from BilinearSamplingOld import grid_bilinear_sampling
 from MatInverse import inv
 import os
 from pdb import set_trace as st
@@ -640,8 +640,6 @@ class DirectVO(nn.Module):
                 # print(i)
                 # cur_time = timer()
                 pixel_warp, in_view_mask = self.warp_batch(frames_pyramid[level_idx], level_idx, rot_mat_batch, trans_batch)
-                if level_idx==4 and i==0:
-                    print(pixel_warp)
                 # t_warp += timer()-cur_time
 
                 temporal_grad = pixel_warp - self.ref_frame_pyramid[level_idx].view(3, -1).unsqueeze(0).expand_as(pixel_warp)

@@ -93,7 +93,7 @@ def main():
 
     dataset = KITTIdataset(data_root_path=opt.dataroot, img_size=img_size, bundle_size=3)
     dataloader = DataLoader(dataset, batch_size=opt.batchSize,
-                            shuffle=False, num_workers=opt.nThreads, pin_memory=True)
+                            shuffle=True, num_workers=opt.nThreads, pin_memory=True)
 
     gpu_ids = list(range(torch.cuda.device_count()))
 
