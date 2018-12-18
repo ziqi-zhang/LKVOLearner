@@ -381,24 +381,27 @@ class DirectVO(nn.Module):
         batch_size = b*ref_size
         R_batch = R_batch.view(batch_size, 3, 3)
         t_batch = t_batch.view(batch_size, 3)
-        xy = xy.view(batch_size, N)
-        st()
+        xy = xy.view(b, 1, 2, N).expand(b, ref_size, 2, N).contiguous().view(batch_size, 2, N)
         # xyz = R_batch.bmm(torch.cat((xy.view(1, 2, N).expand(batch_size, 2, N), Variable(self.load_to_device(torch.ones(batch_size, 1, N)))), 1)) \
         #     + t_batch.view(batch_size, 3, 1).expand(batch_size, 3, N) * inv_depth.view(1, 1, N).expand(batch_size, 3, N)
         batch_inv_depth = inv_depth.view(b, 1, N).expand(b, ref_size, N)
         batch_inv_depth = batch_inv_depth.contiguous().view(batch_size, 1, N).expand(batch_size, 3, N)
-        xyz = R_batch[:, :, 0:2].bmm(xy.expand(batch_size, 2, N))\
+        xyz = R_batch[:, :, 0:2].bmm(xy)
+        xyz += R_batch[:, :, 2:3].expand(batch_size, 3, N)
+        xyz += t_batch.contiguous().view(batch_size, 3, 1).expand(batch_size, 3, N) * batch_inv_depth
+        xyz = R_batch[:, :, 0:2].bmm(xy)\
             + R_batch[:, :, 2:3].expand(batch_size, 3, N)\
-            + t_batch.view(batch_size, 3, 1).expand(batch_size, 3, N) * batch_inv_depth
+            + t_batch.contiguous().view(batch_size, 3, 1).expand(batch_size, 3, N) * batch_inv_depth
         z = xyz[:, 2:3, :].clamp(min=1e-10)
         xy_warp = xyz[:, 0:2, :] / z.expand(batch_size, 2, N)
         # u_warp = ((xy_warp[:, 0, :]*self.camparams['fx'] + self.camparams['cx'])/2**level_idx - .5).view(batch_size, N)
         # v_warp = ((xy_warp[:, 1, :]*self.camparams['fy'] + self.camparams['cy'])/2**level_idx - .5).view(batch_size, N)
         # print(self.x_pyramid[level_idx][0])
-        u_warp = ((xy_warp[:, 0, :] * self.camparams['fx'] + self.camparams['cx']) - getattr(self, 'x_'+str(level_idx))[0]).view(
-            batch_size, N) / 2 ** level_idx
-        v_warp = ((xy_warp[:, 1, :] * self.camparams['fy'] + self.camparams['cy']) - getattr(self, 'y_'+str(level_idx))[0]).view(
-            batch_size, N) / 2 ** level_idx
+        xy_warp = xy_warp.view(b, ref_size, 2, N)
+        u_warp = ((xy_warp[:, :, 0, :] * self.camparams['fx'].view(b,1,1) + self.camparams['cx'].view(b,1,1)) - \
+                    getattr(self, 'x_'+str(level_idx))[0]).view(b, ref_size, N) / 2 ** level_idx
+        v_warp = ((xy_warp[:, :, 1, :] * self.camparams['fy'].view(b,1,1) + self.camparams['cy'].view(b,1,1)) - \
+                    getattr(self, 'y_'+str(level_idx))[0]).view(b, ref_size, N) / 2 ** level_idx
 
         Q, in_view_mask =  grid_bilinear_sampling(img_batch, u_warp, v_warp)
         return Q, in_view_mask * (z.view_as(in_view_mask)>1e-10).float()
@@ -665,6 +668,8 @@ class DirectVO(nn.Module):
                 # cur_time = timer()
 
                 pixel_warp, in_view_mask = self.warp_batch(frames_pyramid[level_idx], level_idx, rot_mat_batch, trans_batch)
+                if level_idx==4 and i==0:
+                    print(pixel_warp)
                 # t_warp += timer()-cur_time
 
                 temporal_grad = pixel_warp - self.ref_frame_pyramid[level_idx].view(3, -1).unsqueeze(0).expand_as(pixel_warp)

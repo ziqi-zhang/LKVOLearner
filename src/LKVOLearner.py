@@ -1,4 +1,5 @@
 from DirectVOLayer import DirectVO
+from DirectVOLayerOld import DirectVO as DirectVOOld
 from networks import VggDepthEstimator, PoseNet
 from ImagePyramid import ImagePyramidLayer
 import torch.nn as nn
@@ -67,6 +68,7 @@ class LKVOKernel(nn.Module):
         self.img_size = img_size
         self.fliplr_func = FlipLR(imW=img_size[1], dim_w=3)
         self.vo = DirectVO(imH=img_size[0], imW=img_size[1], pyramid_layer_num=5)
+        self.old_vo = DirectVOOld(imH=img_size[0], imW=img_size[1], pyramid_layer_num=5)
         self.pose_net = PoseNet(3)
         self.depth_net = VggDepthEstimator(img_size)
         self.pyramid_func = ImagePyramidLayer(chan=1, pyramid_layer_num=5)
@@ -177,21 +179,6 @@ class LKVOKernel(nn.Module):
         src_inv_depth_pyramid = [depth[:, src_frame_idx, :, :] for depth in inv_depth_norm_pyramid]
         src_inv_depth0_pyramid = [depth[:, src_frame_idx, :, :] for depth in inv_depth0_pyramid]
 
-        self.vo.setCamera(fx=camparams[:,0:1], cx=camparams[:,2:3],
-                            fy=camparams[:,4:5], cy=camparams[:,5:6])
-        self.vo.init(ref_frame_pyramid=ref_frame_pyramid, inv_depth_pyramid=ref_inv_depth0_pyramid)
-        p_batch = []
-        for b_idx in range(b):
-            single_frames = frames[b_idx,:,:,:]
-            p = self.pose_net.forward((single_frames.view(1, -1, single_frames.size(2), single_frames.size(3))-127) / 127)
-            p_batch.append(p)
-        p =  torch.stack(p_batch).contiguous().squeeze(1)
-        rot_mat = self.vo.twist2mat_batch_func(p[:,:,0:3]).contiguous()
-        trans = p[:,:,3:6].contiguous()
-        rot_mat, trans = self.vo.update_with_init_pose(src_frames_pyramid[0:lk_level], \
-                            max_itr_num=max_lk_iter_num, rot_mat_batch=rot_mat, trans_batch=trans)
-        st()
-
         for b_idx in range(b):
             single_ref_frame_pyramid = [frame[b_idx,:,:,:] for frame in ref_frame_pyramid]
             single_ref_inv_depth0_pyramid = [depth[b_idx,:,:] for depth in ref_inv_depth0_pyramid]
@@ -206,13 +193,13 @@ class LKVOKernel(nn.Module):
             # single_kpts = kpts[b_idx]
 
             # predict with posenet
-            self.vo.setCamera(fx=camparams[b_idx][0], cx=camparams[b_idx][2],
+            self.old_vo.setCamera(fx=camparams[b_idx][0], cx=camparams[b_idx][2],
                                 fy=camparams[b_idx][4], cy=camparams[b_idx][5])
-            self.vo.init(ref_frame_pyramid=single_ref_frame_pyramid, inv_depth_pyramid=single_ref_inv_depth0_pyramid)
+            self.old_vo.init(ref_frame_pyramid=single_ref_frame_pyramid, inv_depth_pyramid=single_ref_inv_depth0_pyramid)
             p = self.pose_net.forward((single_frames.view(1, -1, single_frames.size(2), single_frames.size(3))-127) / 127)
-            rot_mat_single = self.vo.twist2mat_batch_func(p[0,:,0:3]).contiguous()
+            rot_mat_single = self.old_vo.twist2mat_batch_func(p[0,:,0:3]).contiguous()
             trans_single = p[0,:,3:6].contiguous()#*inv_depth_mean_ten
-            rot_mat_single, trans_single = self.vo.update_with_init_pose(single_src_frames_pyramid[0:lk_level], \
+            rot_mat_single, trans_single = self.old_vo.update_with_init_pose(single_src_frames_pyramid[0:lk_level], \
                                 max_itr_num=max_lk_iter_num, rot_mat_batch=rot_mat_single, trans_batch=trans_single)
             if b_idx==0:
                 rot_mat_batch = rot_mat_single.unsqueeze(0)
@@ -230,6 +217,22 @@ class LKVOKernel(nn.Module):
 
             # smoothness_cost = self.vo.multi_scale_smoothness_cost(inv_depth_pyramid, levels=range(1,5))
             # smoothness_cost = self.vo.multi_scale_smoothness_cost(inv_depth0_pyramid, levels=range(1,5))
+
+
+        self.vo.setCamera(fx=camparams[:,0:1], cx=camparams[:,2:3],
+                            fy=camparams[:,4:5], cy=camparams[:,5:6])
+        self.vo.init(ref_frame_pyramid=ref_frame_pyramid, inv_depth_pyramid=ref_inv_depth0_pyramid)
+        p_batch = []
+        for b_idx in range(b):
+            single_frames = frames[b_idx,:,:,:]
+            p = self.pose_net.forward((single_frames.view(1, -1, single_frames.size(2), single_frames.size(3))-127) / 127)
+            p_batch.append(p)
+        p =  torch.stack(p_batch).contiguous().squeeze(1)
+        rot_mat = self.vo.twist2mat_batch_func(p[:,:,0:3]).contiguous()
+        trans = p[:,:,3:6].contiguous()
+        rot_mat, trans = self.vo.update_with_init_pose(src_frames_pyramid[0:lk_level], \
+                            max_itr_num=max_lk_iter_num, rot_mat_batch=rot_mat, trans_batch=trans)
+        st()
 
         photometric_cost, warp_img_save = self.vo.compute_phtometric_loss(ref_frame_pyramid, src_frames_pyramid, ref_inv_depth_pyramid, \
                                                                 src_inv_depth_pyramid, rot_mat_batch, trans_batch, levels=[0,1,2,3], use_ssim=use_ssim)
