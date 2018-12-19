@@ -225,19 +225,20 @@ class LKVOKernel(nn.Module):
 
             rot_mat_single = self.old_vo.twist2mat_batch_func(p[0,:,0:3]).contiguous()
             trans_single = p[0,:,3:6].contiguous()#*inv_depth_mean_ten
+
             rot_mat_single, trans_single = self.old_vo.update_with_init_pose(single_src_frames_pyramid[0:lk_level], \
                                 max_itr_num=max_lk_iter_num, rot_mat_batch=rot_mat_single, trans_batch=trans_single)
 
-            trans_single = trans_single.unsqueeze(0)
-            rot_mat_single = rot_mat_single.unsqueeze(0)
+            # trans_single = trans_single.unsqueeze(0)
+            # rot_mat_single = rot_mat_single.unsqueeze(0)
             single_photometric_cost, _ = self.old_vo.compute_phtometric_loss(self.old_vo.ref_frame_pyramid, single_src_frames_pyramid, single_ref_inv_depth_pyramid, \
                                                                 single_src_inv_depth_pyramid, rot_mat_single, trans_single, levels=[0,1,2,3], use_ssim=use_ssim)
             if b_idx==0:
-                rot_mat_batch = rot_mat_single
-                trans_batch = trans_single
+                rot_mat_batch = rot_mat_single.unsqueeze(0)
+                trans_batch = trans_single.unsqueeze(0)
             else:
-                rot_mat_batch = torch.cat((rot_mat_batch, rot_mat_single))
-                trans_batch = torch.cat((trans_batch, trans_single))
+                rot_mat_batch = torch.cat((rot_mat_batch, rot_mat_single.unsqueeze(0)))
+                trans_batch = torch.cat((trans_batch, trans_single.unsqueeze(0)))
 
 
             if b_idx==0:
@@ -278,13 +279,13 @@ class LKVOKernel(nn.Module):
         # print(kpts_cost_check)
         # st()
         # photometric_cost0, reproj_cost0, _, _ = self.vo.compute_phtometric_loss(self.vo.ref_frame_pyramid, src_frames_pyramid, ref_inv_depth0_pyramid, src_inv_depth0_pyramid, rot_mat_batch, trans_batch)
-
         print("rot: {}, {:.5f}%".format((batch_rot_mat-rot_mat_batch).abs().sum(), \
               (batch_rot_mat-rot_mat_batch).abs().sum() / rot_mat_batch.abs().sum() ))
         print("t  : {}, {:.5f}%".format((batch_trans-trans_batch).abs().sum(), \
               (batch_trans-trans_batch).abs().sum() / trans_batch.abs().sum() ))
-        photometric_cost_1by1 = batch_photometric_cost.sum()
-        print("phot {}".format((photometric_cost - photometric_cost_1by1).abs()))
+        photometric_cost_1by1 = batch_photometric_cost.mean()
+        print("phot {}, {:.5f}%".format((photometric_cost - photometric_cost_1by1).abs(), \
+              photometric_cost / photometric_cost_1by1))
         st()
 
         # cost = photometric_cost + photometric_cost0 + reproj_cost + reproj_cost0 + lambda_S*smoothness_cost

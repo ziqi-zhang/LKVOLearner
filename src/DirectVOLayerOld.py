@@ -353,21 +353,18 @@ class DirectVO(nn.Module):
         return dp.view(batch_size, 6)
 
     def warp_batch(self, img_batch, level_idx, R_batch, t_batch):
-        return self.warp_batch_func(img_batch, self.inv_depth_pyramid[level_idx], \
-                                    level_idx, R_batch, t_batch)
+        return self.warp_batch_func(img_batch, self.inv_depth_pyramid[level_idx], level_idx, R_batch, t_batch)
 
 
     def warp_batch_func(self, img_batch, inv_depth, level_idx, R_batch, t_batch):
         batch_size, k, h, w = img_batch.size()
         xy = self.xy_pyramid[level_idx]
         _, N = xy.size()
-
         # xyz = R_batch.bmm(torch.cat((xy.view(1, 2, N).expand(batch_size, 2, N), Variable(self.load_to_device(torch.ones(batch_size, 1, N)))), 1)) \
         #     + t_batch.view(batch_size, 3, 1).expand(batch_size, 3, N) * inv_depth.view(1, 1, N).expand(batch_size, 3, N)
         xyz = R_batch[:, :, 0:2].bmm(xy.view(1, 2, N).expand(batch_size, 2, N))\
             + R_batch[:, :, 2:3].expand(batch_size, 3, N)\
-            + t_batch.view(batch_size, 3, 1).expand(batch_size, 3, N) \
-                * inv_depth.view(-1, 1, N).expand(batch_size, 3, N)
+            + t_batch.view(batch_size, 3, 1).expand(batch_size, 3, N) * inv_depth.view(-1, 1, N).expand(batch_size, 3, N)
         z = xyz[:, 2:3, :].clamp(min=1e-10)
         xy_warp = xyz[:, 0:2, :] / z.expand(batch_size, 2, N)
         # u_warp = ((xy_warp[:, 0, :]*self.camparams['fx'] + self.camparams['cx'])/2**level_idx - .5).view(batch_size, N)
@@ -387,10 +384,7 @@ class DirectVO(nn.Module):
                                 use_ssim=True, levels=None,
                                 ref_expl_mask_pyramid=None,
                                 src_expl_mask_pyramid=None):
-        b = rot_mat_batch.size(0)
-        bundle_size = rot_mat_batch.size(1)+1
-        rot_mat_batch = rot_mat_batch.view(b*(bundle_size-1), 3, 3)
-        trans_batch = trans_batch.view(b*(bundle_size-1), 3)
+        bundle_size = rot_mat_batch.size(0)+1
         inv_rot_mat_batch, inv_trans_batch = inv_rigid_transformation(rot_mat_batch, trans_batch)
         src_pyramid = []
         ref_pyramid = []
@@ -408,20 +402,14 @@ class DirectVO(nn.Module):
                 expl_mask_pyramid.append(torch.cat(
                     (ref_mask, src_mask), 0))
 
-        # for level_idx in range(len(ref_frames_pyramid)):
 
+        # for level_idx in range(len(ref_frames_pyramid)):
         for level_idx in levels:
         # for level_idx in range(3):
-            st()
             ref_frame = ref_frames_pyramid[level_idx].unsqueeze(0).repeat(bundle_size-1, 1, 1, 1)
             src_frame = src_frames_pyramid[level_idx]
             ref_depth = ref_inv_depth_pyramid[level_idx].unsqueeze(0).repeat(bundle_size-1, 1, 1)
             src_depth = src_inv_depth_pyramid[level_idx]
-            h, w = ref_frame.shape[-2:]
-            ref_frame = ref_frame.view(b*(bundle_size-1), 3, h, w)
-            src_frame = src_frame.view(b*(bundle_size-1), 3, h, w)
-            ref_depth = ref_depth.view(b*(bundle_size-1), h, w)
-            src_depth = src_depth.view(b*(bundle_size-1), h, w)
             # print(src_depth.size())
             ref_pyramid.append(torch.cat((ref_frame,
                                     src_frame), 0)/127.5)
@@ -429,6 +417,7 @@ class DirectVO(nn.Module):
                                     ref_frame), 0)/127.5)
             depth_pyramid.append(torch.cat((ref_depth,
                                     src_depth), 0))
+
 
         rot_mat = torch.cat((rot_mat_batch,
                             inv_rot_mat_batch) ,0)
@@ -449,17 +438,17 @@ class DirectVO(nn.Module):
                     src_pyramid[level_idx],
                     depth_pyramid[level_idx],
                     level_idx, rot_mat, trans)
-            warp_img = warp_img.view((bundle_size-1)*2*b, IMG_CHAN, h, w)
+            warp_img = warp_img.view((bundle_size-1)*2, IMG_CHAN, h, w)
             # warp_img_save is the warped img from src to ref with full size
-
             if level_idx==0:
-                split_idx = b*(bundle_size-1)
-                warp_img_save = [warp_img[split_idx:split_idx+1], warp_img[0:2], warp_img[split_idx+1:split_idx+2]]
+                warp_img_save = [warp_img[2:3], warp_img[0:2], warp_img[3:4]]
             if use_expl_mask:
                 mask = in_view_mask.view(-1,h,w)*expl_mask_pyramid[level_idx]
             else:
                 mask = in_view_mask
-            mask_expand = mask.view((bundle_size-1)*2*b, 1, h, w).expand((bundle_size-1)*2*b, IMG_CHAN, h, w)
+            mask_expand = mask.view((bundle_size-1)*2, 1, h, w).expand((bundle_size-1)*2, IMG_CHAN, h, w)
+            if level_idx==0:
+                print("old {}".format(((ref_pyramid[level_idx] - warp_img).abs()*mask_expand).mean()))
             rgb_loss = ((ref_pyramid[level_idx] - warp_img).abs()*mask_expand).mean()
             if use_ssim and level_idx<1:
                 # print("compute ssim loss------")
@@ -533,24 +522,22 @@ class DirectVO(nn.Module):
         return cost
 
     def multi_scale_image_aware_smoothness_cost(self, inv_depth_pyramid, img_pyramid, levels=None, type='lap'):
-
         # for level_idx in range(self.pyramid_layer_num):
         cost = 0
         if levels is None:
             levels = range(self.pyramid_layer_num)
         for level_idx in levels:
-            b, bundle_size, h, w = inv_depth_pyramid[level_idx].shape
             # print(level_idx)
-            inv_depth = inv_depth_pyramid[level_idx].view(b*bundle_size, h, w)
-            frames = img_pyramid[level_idx].view(b*bundle_size, 3, h, w)
-            inv_depth = inv_depth.squeeze(1)
+            inv_depth = inv_depth_pyramid[level_idx]
+            if inv_depth.dim() == 4:
+                inv_depth = inv_depth.squeeze(1)
             # cost += compute_img_aware_smoothness_cost(inv_depth, img_pyramid[level_idx])/(2**level_idx)
             if type == 'lap':
-                c = self.compute_image_aware_laplacian_smoothness_cost(inv_depth, frames)
+                c = self.compute_image_aware_laplacian_smoothness_cost(inv_depth, img_pyramid[level_idx])
             elif type == '1st':
-                c = self.compute_image_aware_1st_smoothness_cost(inv_depth, frames)
+                c = self.compute_image_aware_1st_smoothness_cost(inv_depth, img_pyramid[level_idx])
             elif type == '2nd':
-                c = self.compute_image_aware_2nd_smoothness_cost(inv_depth, frames)
+                c = self.compute_image_aware_2nd_smoothness_cost(inv_depth, img_pyramid[level_idx])
             else:
                 print("%s not implemented!" %(type))
             cost += (c / (2**level_idx))
@@ -644,14 +631,12 @@ class DirectVO(nn.Module):
             for i in range(max_itr_num):
                 # print(i)
                 # cur_time = timer()
-                pixel_warp, in_view_mask = self.warp_batch(frames_pyramid[level_idx], \
-                                            level_idx, rot_mat_batch, trans_batch)
+                pixel_warp, in_view_mask = self.warp_batch(frames_pyramid[level_idx], level_idx, rot_mat_batch, trans_batch)
                 # t_warp += timer()-cur_time
 
                 temporal_grad = pixel_warp - self.ref_frame_pyramid[level_idx].view(3, -1).unsqueeze(0).expand_as(pixel_warp)
 
-                photometric_cost, min_perc_in_view = compute_photometric_cost_norm(\
-                                                temporal_grad.data, in_view_mask.data)
+                photometric_cost, min_perc_in_view = compute_photometric_cost_norm(temporal_grad.data, in_view_mask.data)
 
                 if min_perc_in_view < .5:
                     break
@@ -667,9 +652,7 @@ class DirectVO(nn.Module):
 
                     # d_rot_mat_batch = self.twist2mat_batch_func(-dp[:, 0:3])
                     d_rot_mat_batch = self.twist2mat_batch_func(dp[:, 0:3]).transpose(1,2)
-                    trans_batch_new = \
-                        d_rot_mat_batch.bmm(trans_batch.view(frame_num, 3, 1)).view(frame_num, 3) \
-                        - dp[:, 3:6]
+                    trans_batch_new = d_rot_mat_batch.bmm(trans_batch.view(frame_num, 3, 1)).view(frame_num, 3) - dp[:, 3:6]
                     rot_mat_batch_new = d_rot_mat_batch.bmm(rot_mat_batch)
 
                     trans_list = []
