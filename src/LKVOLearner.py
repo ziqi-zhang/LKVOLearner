@@ -283,7 +283,7 @@ class LKVOKernel(nn.Module):
               (batch_rot_mat-rot_mat_batch).abs().sum() / rot_mat_batch.abs().sum() ))
         print("t  : {}, {:.5f}%".format((batch_trans-trans_batch).abs().sum(), \
               (batch_trans-trans_batch).abs().sum() / trans_batch.abs().sum() ))
-        photometric_cost_1by1 = batch_photometric_cost.mean()
+        photometric_cost_1by1 = batch_photometric_cost.sum()
         print("phot {}".format((photometric_cost - photometric_cost_1by1).abs()))
         st()
 

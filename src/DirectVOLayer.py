@@ -463,7 +463,6 @@ class DirectVO(nn.Module):
                                 src_expl_mask_pyramid=None):
         b = rot_mat_batch.size(0)
         bundle_size = rot_mat_batch.size(1)+1
-
         rot_mat_batch = rot_mat_batch.view(b*(bundle_size-1), 3, 3)
         trans_batch = trans_batch.view(b*(bundle_size-1), 3)
         inv_rot_mat_batch, inv_trans_batch = inv_rigid_transformation(rot_mat_batch, trans_batch)
@@ -783,7 +782,7 @@ class DirectVO(nn.Module):
                                 trans_list.append(trans_batch[bk, k])
                     rot_mat_batch = torch.cat(rot_list, 0).view(batch_size, frame_num, 3, 3)
                     trans_batch = torch.cat(trans_list, 0).view(batch_size, frame_num, 3)
-                    
+
 
                 else:
                     break

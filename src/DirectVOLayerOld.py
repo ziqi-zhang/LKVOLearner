@@ -412,9 +412,10 @@ class DirectVO(nn.Module):
 
         for level_idx in levels:
         # for level_idx in range(3):
-            ref_frame = ref_frames_pyramid[level_idx].unsqueeze(1).repeat(1, bundle_size-1, 1, 1, 1)
+            st()
+            ref_frame = ref_frames_pyramid[level_idx].unsqueeze(0).repeat(bundle_size-1, 1, 1, 1)
             src_frame = src_frames_pyramid[level_idx]
-            ref_depth = ref_inv_depth_pyramid[level_idx].unsqueeze(1).repeat(1, bundle_size-1, 1, 1)
+            ref_depth = ref_inv_depth_pyramid[level_idx].unsqueeze(0).repeat(bundle_size-1, 1, 1)
             src_depth = src_inv_depth_pyramid[level_idx]
             h, w = ref_frame.shape[-2:]
             ref_frame = ref_frame.view(b*(bundle_size-1), 3, h, w)
