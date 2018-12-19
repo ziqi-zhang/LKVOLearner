@@ -199,74 +199,72 @@ class LKVOKernel(nn.Module):
         batch_rot_mat, batch_trans = self.vo.update_with_init_pose(src_frames_pyramid[0:lk_level], \
                             max_itr_num=max_lk_iter_num, rot_mat_batch=rot_mat, trans_batch=trans)
 
-        for b_idx in range(b):
-            single_ref_frame_pyramid = [frame[b_idx,:,:,:] for frame in ref_frame_pyramid]
-            single_ref_inv_depth0_pyramid = [depth[b_idx,:,:] for depth in ref_inv_depth0_pyramid]
-            single_ref_inv_depth_pyramid = [depth[b_idx,:,:] for depth in ref_inv_depth_pyramid]
-            single_frames = frames[b_idx]
-            single_src_frames_pyramid = [frame[b_idx] for frame in src_frames_pyramid]
-            single_inv_depth0_pyramid = [depth[b_idx,:,:] for depth in inv_depth0_pyramid]
-            single_inv_depth_norm_pyramid = [depth[b_idx,:,:] for depth in inv_depth_norm_pyramid]
-            single_src_inv_depth_pyramid = [depth[b_idx,:,:] for depth in src_inv_depth_pyramid]
-            single_src_inv_depth0_pyramid = [depth[b_idx,:,:] for depth in src_inv_depth0_pyramid]
-            single_frames_pyramid = [frame[b_idx,:,:,:] for frame in frames_pyramid]
-            single_kpts = kpts[b_idx]
-
-            # predict with posenet
-            self.old_vo.setCamera(fx=camparams[b_idx][0], cx=camparams[b_idx][2],
-                                fy=camparams[b_idx][4], cy=camparams[b_idx][5])
-            self.old_vo.init(ref_frame_pyramid=single_ref_frame_pyramid, inv_depth_pyramid=single_ref_inv_depth0_pyramid)
-            p = self.pose_net.forward((single_frames.view(1, -1, single_frames.size(2), single_frames.size(3))-127) / 127)
-            # single_invH = self.old_vo.invH_pyramid
-            # if b_idx==0:
-            #     s_invH = [f.unsqueeze(0) for f in single_invH]
-            # else:
-            #     s_invH = [torch.cat((b_f, s_f.unsqueeze(0))) for b_f, s_f in zip(s_invH, single_invH)]
-
-            rot_mat_single = self.old_vo.twist2mat_batch_func(p[0,:,0:3]).contiguous()
-            trans_single = p[0,:,3:6].contiguous()#*inv_depth_mean_ten
-
-            rot_mat_single, trans_single = self.old_vo.update_with_init_pose(single_src_frames_pyramid[0:lk_level], \
-                                max_itr_num=max_lk_iter_num, rot_mat_batch=rot_mat_single, trans_batch=trans_single)
-
-            # trans_single = trans_single.unsqueeze(0)
-            # rot_mat_single = rot_mat_single.unsqueeze(0)
-            single_photometric_cost, _ = self.old_vo.compute_phtometric_loss(self.old_vo.ref_frame_pyramid, single_src_frames_pyramid, single_ref_inv_depth_pyramid, \
-                                                                single_src_inv_depth_pyramid, rot_mat_single, trans_single, levels=[0,1,2,3], use_ssim=use_ssim)
-            if b_idx==0:
-                rot_mat_batch = rot_mat_single.unsqueeze(0)
-                trans_batch = trans_single.unsqueeze(0)
-            else:
-                rot_mat_batch = torch.cat((rot_mat_batch, rot_mat_single.unsqueeze(0)))
-                trans_batch = torch.cat((trans_batch, trans_single.unsqueeze(0)))
-
-
-            if b_idx==0:
-                batch_photometric_cost = [single_photometric_cost]
-            else:
-                batch_photometric_cost.append(single_photometric_cost)
-
-            # predict with only ddvo
-            # rot_mat_batch, trans_batch = \
-            #     self.vo.forward(ref_frame_pyramid, src_frames_pyramid, ref_inv_depth0_pyramid, max_itr_num=max_lk_iter_num)
-
-            #
-            # smoothness_cost = self.vo.multi_scale_smoothness_cost(inv_depth_pyramid)
-            # smoothness_cost += self.vo.multi_scale_smoothness_cost(inv_depth0_pyramid)
-
-            # smoothness_cost = self.vo.multi_scale_smoothness_cost(inv_depth_pyramid, levels=range(1,5))
-            # smoothness_cost = self.vo.multi_scale_smoothness_cost(inv_depth0_pyramid, levels=range(1,5))
-
-        if False:
-            # check invH
-            invH_sum = (b_invH[0]-s_invH[0]).abs().sum()
-            for i in range(1, 5):
-                invH_sum += (b_invH[i]-s_invH[i]).abs().sum()
-            print("invH error: {}".format(invH_sum))
-
-        batch_photometric_cost = torch.stack(batch_photometric_cost)
-
-
+        # for b_idx in range(b):
+        #     single_ref_frame_pyramid = [frame[b_idx,:,:,:] for frame in ref_frame_pyramid]
+        #     single_ref_inv_depth0_pyramid = [depth[b_idx,:,:] for depth in ref_inv_depth0_pyramid]
+        #     single_ref_inv_depth_pyramid = [depth[b_idx,:,:] for depth in ref_inv_depth_pyramid]
+        #     single_frames = frames[b_idx]
+        #     single_src_frames_pyramid = [frame[b_idx] for frame in src_frames_pyramid]
+        #     single_inv_depth0_pyramid = [depth[b_idx,:,:] for depth in inv_depth0_pyramid]
+        #     single_inv_depth_norm_pyramid = [depth[b_idx,:,:] for depth in inv_depth_norm_pyramid]
+        #     single_src_inv_depth_pyramid = [depth[b_idx,:,:] for depth in src_inv_depth_pyramid]
+        #     single_src_inv_depth0_pyramid = [depth[b_idx,:,:] for depth in src_inv_depth0_pyramid]
+        #     single_frames_pyramid = [frame[b_idx,:,:,:] for frame in frames_pyramid]
+        #     single_kpts = kpts[b_idx]
+        #
+        #     # predict with posenet
+        #     self.old_vo.setCamera(fx=camparams[b_idx][0], cx=camparams[b_idx][2],
+        #                         fy=camparams[b_idx][4], cy=camparams[b_idx][5])
+        #     self.old_vo.init(ref_frame_pyramid=single_ref_frame_pyramid, inv_depth_pyramid=single_ref_inv_depth0_pyramid)
+        #     p = self.pose_net.forward((single_frames.view(1, -1, single_frames.size(2), single_frames.size(3))-127) / 127)
+        #     # single_invH = self.old_vo.invH_pyramid
+        #     # if b_idx==0:
+        #     #     s_invH = [f.unsqueeze(0) for f in single_invH]
+        #     # else:
+        #     #     s_invH = [torch.cat((b_f, s_f.unsqueeze(0))) for b_f, s_f in zip(s_invH, single_invH)]
+        #
+        #     rot_mat_single = self.old_vo.twist2mat_batch_func(p[0,:,0:3]).contiguous()
+        #     trans_single = p[0,:,3:6].contiguous()#*inv_depth_mean_ten
+        #
+        #     rot_mat_single, trans_single = self.old_vo.update_with_init_pose(single_src_frames_pyramid[0:lk_level], \
+        #                         max_itr_num=max_lk_iter_num, rot_mat_batch=rot_mat_single, trans_batch=trans_single)
+        #
+        #     # trans_single = trans_single.unsqueeze(0)
+        #     # rot_mat_single = rot_mat_single.unsqueeze(0)
+        #     single_photometric_cost, _ = self.old_vo.compute_phtometric_loss(self.old_vo.ref_frame_pyramid, single_src_frames_pyramid, single_ref_inv_depth_pyramid, \
+        #                                                         single_src_inv_depth_pyramid, rot_mat_single, trans_single, levels=[0,1,2,3], use_ssim=use_ssim)
+        #     if b_idx==0:
+        #         rot_mat_batch = rot_mat_single.unsqueeze(0)
+        #         trans_batch = trans_single.unsqueeze(0)
+        #     else:
+        #         rot_mat_batch = torch.cat((rot_mat_batch, rot_mat_single.unsqueeze(0)))
+        #         trans_batch = torch.cat((trans_batch, trans_single.unsqueeze(0)))
+        #
+        #
+        #     if b_idx==0:
+        #         batch_photometric_cost = [single_photometric_cost]
+        #     else:
+        #         batch_photometric_cost.append(single_photometric_cost)
+        #
+        #     # predict with only ddvo
+        #     # rot_mat_batch, trans_batch = \
+        #     #     self.vo.forward(ref_frame_pyramid, src_frames_pyramid, ref_inv_depth0_pyramid, max_itr_num=max_lk_iter_num)
+        #
+        #     #
+        #     # smoothness_cost = self.vo.multi_scale_smoothness_cost(inv_depth_pyramid)
+        #     # smoothness_cost += self.vo.multi_scale_smoothness_cost(inv_depth0_pyramid)
+        #
+        #     # smoothness_cost = self.vo.multi_scale_smoothness_cost(inv_depth_pyramid, levels=range(1,5))
+        #     # smoothness_cost = self.vo.multi_scale_smoothness_cost(inv_depth0_pyramid, levels=range(1,5))
+        #
+        # if False:
+        #     # check invH
+        #     invH_sum = (b_invH[0]-s_invH[0]).abs().sum()
+        #     for i in range(1, 5):
+        #         invH_sum += (b_invH[i]-s_invH[i]).abs().sum()
+        #     print("invH error: {}".format(invH_sum))
+        #
+        # batch_photometric_cost = torch.stack(batch_photometric_cost)
 
         photometric_cost, warp_img_save = self.vo.compute_phtometric_loss(ref_frame_pyramid, src_frames_pyramid, ref_inv_depth_pyramid, \
                                                                 src_inv_depth_pyramid, batch_rot_mat, batch_trans, levels=[0,1,2,3], use_ssim=use_ssim)
@@ -277,16 +275,15 @@ class LKVOKernel(nn.Module):
         # kpts_cost_check = self.check_kpts_diff(inv_depth_norm_pyramid[0], kpts, trans_batch)
         # print(kpts_cost)
         # print(kpts_cost_check)
+
+        # print("rot: {}, {:.5f}%".format((batch_rot_mat-rot_mat_batch).abs().sum(), \
+        #       (batch_rot_mat-rot_mat_batch).abs().sum() / rot_mat_batch.abs().sum() ))
+        # print("t  : {}, {:.5f}%".format((batch_trans-trans_batch).abs().sum(), \
+        #       (batch_trans-trans_batch).abs().sum() / trans_batch.abs().sum() ))
+        # photometric_cost_1by1 = batch_photometric_cost.mean()
+        # print("phot {}, {:.5f}%".format((photometric_cost - photometric_cost_1by1).abs(), \
+        #       photometric_cost / photometric_cost_1by1))
         # st()
-        # photometric_cost0, reproj_cost0, _, _ = self.vo.compute_phtometric_loss(self.vo.ref_frame_pyramid, src_frames_pyramid, ref_inv_depth0_pyramid, src_inv_depth0_pyramid, rot_mat_batch, trans_batch)
-        print("rot: {}, {:.5f}%".format((batch_rot_mat-rot_mat_batch).abs().sum(), \
-              (batch_rot_mat-rot_mat_batch).abs().sum() / rot_mat_batch.abs().sum() ))
-        print("t  : {}, {:.5f}%".format((batch_trans-trans_batch).abs().sum(), \
-              (batch_trans-trans_batch).abs().sum() / trans_batch.abs().sum() ))
-        photometric_cost_1by1 = batch_photometric_cost.mean()
-        print("phot {}, {:.5f}%".format((photometric_cost - photometric_cost_1by1).abs(), \
-              photometric_cost / photometric_cost_1by1))
-        st()
 
         # cost = photometric_cost + photometric_cost0 + reproj_cost + reproj_cost0 + lambda_S*smoothness_cost
         cost = photometric_cost + lambda_S*smoothness_cost + lambda_K*kpts_cost

@@ -130,8 +130,6 @@ def main():
         mkdir(vis_dir)
         t = timer()
         for ii, data in enumerate(dataloader):
-            if ii<101:
-                continue
             optimizer.zero_grad()
             frames = Variable(data[0].float().cuda())
             camparams = Variable(data[1])
