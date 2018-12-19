@@ -406,6 +406,7 @@ class DirectVO(nn.Module):
                     (ref_mask, src_mask), 0))
 
         # for level_idx in range(len(ref_frames_pyramid)):
+        
         for level_idx in levels:
         # for level_idx in range(3):
             ref_frame = ref_frames_pyramid[level_idx].unsqueeze(1).repeat(1, bundle_size-1, 1, 1, 1)

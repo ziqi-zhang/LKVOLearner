@@ -84,9 +84,9 @@ class GradientLayer(nn.Module):
         self.pady_func = torch.nn.ReplicationPad2d((0,0,1,1))
 
     def forward(self, img):
-        b, bundle_size, h, w = img.shape
+        b, k, h, w = img.shape
         # img_ = img.unsqueeze(1)
-        img_ = img.contiguous().view(b*bundle_size, 1, h, w)
+        img_ = img.contiguous().view(b*k, 1, h, w)
         img_padx = self.padx_func(img_)
         img_dx = torch.nn.functional.conv2d(input=img_padx,
                         weight=Variable(self.wx),
@@ -98,15 +98,15 @@ class GradientLayer(nn.Module):
                         weight=Variable(self.wy),
                         stride=1,
                         padding=0)
-        img_dx = img_dx.view(b, bundle_size, h, w)
-        img_dy = img_dy.view(b, bundle_size, h, w)
+        img_dx = img_dx.view(b, k, h, w)
+        img_dy = img_dy.view(b, k, h, w)
         return img_dx, img_dy
 
 
 class Twist2Mat(nn.Module):
     def __init__(self):
         super(Twist2Mat, self).__init__()
-        self.register_buffer('o', torch.zeros(1,1))
+        self.register_buffer('o', torch.zeros(1,1,1))
         self.register_buffer('E', torch.eye(3))
 
     def cprodmat_batch(self, a_batch):
@@ -309,10 +309,21 @@ class DirectVO(nn.Module):
                                      self.inv_depth_pyramid[i],
                                      self.xy_pyramid[i])
             self.dIdp_pyramid.append(dIdp)
+
+            # check error between inv and batch_inv
             # invH = inv(dIdp.t().mm(dIdp))
-            invH = dIdp.transpose(1,2).bmm(dIdp)
-            invH = inv_batch(invH)
+            # b_invH = inv_batch(dIdp.transpose(1,2).bmm(dIdp))
+            # H = dIdp[0].t().mm(dIdp[0])
+            # invH = inv(H).unsqueeze(0)
+            # for i in range(1, dIdp.shape[0]):
+            #     H = dIdp[i].t().mm(dIdp[i])
+            #     invH = torch.cat((invH, inv(H).unsqueeze(0)))
+            # print("invH error: {}".format((b_invH-invH).abs().sum()))
+            invH = inv_batch(dIdp.transpose(1,2).bmm(dIdp))
+
             self.invH_pyramid.append(invH)
+
+            # check error between inv and batch_inv
             # self.invH_dIdp_pyramid.append(self.invH_pyramid[-1].mm(dIdp.t()))
             self.invH_dIdp_pyramid.append(invH.bmm(dIdp.transpose(1,2)))
 
