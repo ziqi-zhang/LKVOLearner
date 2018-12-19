@@ -93,7 +93,7 @@ def main():
 
     dataset = KITTIdataset(data_root_path=opt.dataroot, img_size=img_size, bundle_size=3)
     dataloader = DataLoader(dataset, batch_size=opt.batchSize,
-                            shuffle=True, num_workers=opt.nThreads, pin_memory=True)
+                            shuffle=False, num_workers=opt.nThreads, pin_memory=True)
 
     gpu_ids = list(range(torch.cuda.device_count()))
 
@@ -130,7 +130,8 @@ def main():
         mkdir(vis_dir)
         t = timer()
         for ii, data in enumerate(dataloader):
-
+            if ii<101:
+                continue
             optimizer.zero_grad()
             frames = Variable(data[0].float().cuda())
             camparams = Variable(data[1])
