@@ -167,7 +167,7 @@ def main():
                 if np.mod(step_num, opt.print_freq)==0:
                     elapsed_time = timer()-t
                     print('epoch %s[%s/%s], ... elapsed time: %f (s)' % (epoch, step_num, len(dataloader), elapsed_time))
-                    print(inv_depths_mean)
+                    # print(inv_depths_mean)
                     t = timer()
                     print("Print: photometric_cost {:.3f}, smoothness_cost {:.3f}, cost {:.3f}".format(photometric_cost.data.cpu().item(),
                             smoothness_cost.data.cpu().item(), cost.data.cpu().item()))
