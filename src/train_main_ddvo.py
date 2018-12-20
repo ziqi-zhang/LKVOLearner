@@ -139,6 +139,7 @@ def main():
             mkdir(vis_dir)
             t = timer()
         for ii, data in enumerate(dataloader):
+            break
             optimizer.zero_grad()
             frames = Variable(data[0].float().cuda())
             camparams = Variable(data[1].float().cuda())
@@ -171,6 +172,7 @@ def main():
                     t = timer()
                     print("Print: photometric_cost {:.3f}, smoothness_cost {:.3f}, cost {:.3f}".format(photometric_cost.data.cpu().item(),
                             smoothness_cost.data.cpu().item(), cost.data.cpu().item()))
+                    print("Filename: {}".format(opt.checkpoints_dir))
                     # visualizer.plot_current_errors(step_num, 1, opt,
                     #             OrderedDict([('photometric_cost', photometric_cost.data.cpu()[0]),
                     #              ('smoothness_cost', smoothness_cost.data.cpu()[0]),
