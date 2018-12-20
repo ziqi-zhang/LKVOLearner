@@ -33,7 +33,7 @@ fieldnames = ['abs_rel', 'sq_rel', 'rms', 'log_rms', 'd1_all',
                 'a1', 'a2', 'a3']
 
 import linklink as link
-from distributed_utils import dist_init, reduce_gradients, DistModule
+from distributed_utils import dist_init, reduce_gradients, DistModule, DistributedSampler
 
 
 def save_val_images(data):
@@ -99,8 +99,10 @@ def main():
     # visualizer = Visualizer(opt)
 
     dataset = KITTIdataset(data_root_path=opt.dataroot, img_size=img_size, bundle_size=3)
+    sampler = DistributedSampler(dataset, world_size, rank)
     dataloader = DataLoader(dataset, batch_size=opt.batchSize,
-                            shuffle=False, num_workers=opt.nThreads, pin_memory=True)
+                            shuffle=False, num_workers=opt.nThreads, \
+                            pin_memory=True, sampler=sampler)
 
 
 
@@ -129,7 +131,6 @@ def main():
     optimizer = optim.Adam(lkvolearner.get_parameters(), lr=opt.lr)
 
     step_num = 0
-
 
 
     for epoch in range(max(0, opt.which_epoch), opt.epoch_num+1):
@@ -165,7 +166,7 @@ def main():
             if rank==0:
                 if np.mod(step_num, opt.print_freq)==0:
                     elapsed_time = timer()-t
-                    print('epoch %s[%s/%s], ... elapsed time: %f (s)' % (epoch, step_num, int(len(dataset)/opt.batchSize), elapsed_time))
+                    print('epoch %s[%s/%s], ... elapsed time: %f (s)' % (epoch, step_num, len(dataloader), elapsed_time))
                     print(inv_depths_mean)
                     t = timer()
                     print("Print: photometric_cost {:.3f}, smoothness_cost {:.3f}, cost {:.3f}".format(photometric_cost.data.cpu().item(),
