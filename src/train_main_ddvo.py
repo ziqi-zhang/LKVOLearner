@@ -32,6 +32,9 @@ from multiprocessing import Pool
 fieldnames = ['abs_rel', 'sq_rel', 'rms', 'log_rms', 'd1_all',
                 'a1', 'a2', 'a3']
 
+import linklink as link
+from distributed_utils import dist_init, reduce_gradients, DistModule
+
 
 def save_val_images(data):
         i, (depth, raw_img, error, val_vis_dir) = data
@@ -81,14 +84,18 @@ def validate(lkvolearner, dataset_root, epoch, vis_dir=None,
     return abs_rel, sq_rel, rms, log_rms, d1_all, a1, a2, a3
 
 def main():
+    rank, world_size = dist_init()
+
     opt = TrainOptions().parse()
-    logger = Logger(opt.tf_log_dir)
+    if rank==0:
+        logger = Logger(opt.tf_log_dir)
     img_size = [opt.imH, opt.imW]
 
-    test_csv = os.path.join(opt.checkpoints_dir, 'test.csv')
-    with open(test_csv, 'w') as csvfile:
-        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-        writer.writeheader()
+    if rank==0:
+        test_csv = os.path.join(opt.checkpoints_dir, 'test.csv')
+        with open(test_csv, 'w') as csvfile:
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+            writer.writeheader()
     # visualizer = Visualizer(opt)
 
     dataset = KITTIdataset(data_root_path=opt.dataroot, img_size=img_size, bundle_size=3)
@@ -114,7 +121,7 @@ def main():
         lkvolearner.load_model(os.path.join(opt.checkpoints_dir, 'depth_net.pth'),
                             os.path.join(opt.checkpoints_dir, 'pose_net.pth'))
 
-    lkvolearner.cuda()
+    # lkvolearner.cuda()
 
     ref_frame_idx = 1
 
@@ -125,10 +132,10 @@ def main():
 
 
     for epoch in range(max(0, opt.which_epoch), opt.epoch_num+1):
-
-        vis_dir = os.path.join(opt.vis_dir, "train_%02d"%epoch)
-        mkdir(vis_dir)
-        t = timer()
+        if rank==0:
+            vis_dir = os.path.join(opt.vis_dir, "train_%02d"%epoch)
+            mkdir(vis_dir)
+            t = timer()
         for ii, data in enumerate(dataloader):
             optimizer.zero_grad()
             frames = Variable(data[0].float().cuda())
@@ -150,75 +157,81 @@ def main():
             # print(cost)
             # print(inv_depth_pyramid)
             cost.backward()
+            reduce_gradients(lkvolearner.lkvo)
             optimizer.step()
             step_num+=1
 
-            if np.mod(step_num, opt.print_freq)==0:
-                elapsed_time = timer()-t
-                print('epoch %s[%s/%s], ... elapsed time: %f (s)' % (epoch, step_num, int(len(dataset)/opt.batchSize), elapsed_time))
-                print(inv_depths_mean)
-                t = timer()
-                print("Print: photometric_cost {:.3f}, smoothness_cost {:.3f}, cost {:.3f}".format(photometric_cost.data.cpu().item(),
-                        smoothness_cost.data.cpu().item(), cost.data.cpu().item()))
-                # visualizer.plot_current_errors(step_num, 1, opt,
-                #             OrderedDict([('photometric_cost', photometric_cost.data.cpu()[0]),
-                #              ('smoothness_cost', smoothness_cost.data.cpu()[0]),
-                #              ('cost', cost.data.cpu()[0])]))
+            if rank==0:
+                if np.mod(step_num, opt.print_freq)==0:
+                    elapsed_time = timer()-t
+                    print('epoch %s[%s/%s], ... elapsed time: %f (s)' % (epoch, step_num, int(len(dataset)/opt.batchSize), elapsed_time))
+                    print(inv_depths_mean)
+                    t = timer()
+                    print("Print: photometric_cost {:.3f}, smoothness_cost {:.3f}, cost {:.3f}".format(photometric_cost.data.cpu().item(),
+                            smoothness_cost.data.cpu().item(), cost.data.cpu().item()))
+                    # visualizer.plot_current_errors(step_num, 1, opt,
+                    #             OrderedDict([('photometric_cost', photometric_cost.data.cpu()[0]),
+                    #              ('smoothness_cost', smoothness_cost.data.cpu()[0]),
+                    #              ('cost', cost.data.cpu()[0])]))
 
-                logger.add_scalar('train/photo', photometric_cost.data.cpu().item(), step_num)
-                logger.add_scalar('train/smooth',smoothness_cost.data.cpu().item(), step_num)
-                logger.add_scalar('train/cost', cost.data.cpu().item(), step_num)
+                    logger.add_scalar('train/photo', photometric_cost.data.cpu().item(), step_num)
+                    logger.add_scalar('train/smooth',smoothness_cost.data.cpu().item(), step_num)
+                    logger.add_scalar('train/cost', cost.data.cpu().item(), step_num)
 
-            if np.mod(step_num, opt.display_freq)==0:
-                # frame_vis = frames.data[:,1,:,:,:].permute(0,2,3,1).contiguous().view(-1,opt.imW, 3).cpu().numpy().astype(np.uint8)
-                # depth_vis = vis_depthmap(inv_depths.data[:,1,:,:].contiguous().view(-1,opt.imW).cpu()).numpy().astype(np.uint8)
-                frame_vis_list = [frame.data.permute(1,2,0).contiguous().cpu().numpy().astype(np.uint8) for frame in frame_list]
-                depth_vis_list = [(vis_depthmap(depth.data.cpu().numpy())*255).astype(np.uint8) for depth in inv_depth_list]
-                print("Display: photometric_cost {:.3f}, smoothness_cost {:.3f}, cost {:.3f}".format(photometric_cost.data.cpu().item(),
-                        smoothness_cost.data.cpu().item(), cost.data.cpu().item()))
-                warp_img_list = [img.cpu().numpy() for img in warp_img_list]
-                warp_img_list = [img*255/(img.max()-img.min()+.00001) for img in warp_img_list]
-                warp_img_list = [img.transpose((0,2,3,1)).astype(np.uint8) for img in warp_img_list]
-                zeros = np.zeros(warp_img_list[0][0].shape)
-                # visualizer.display_current_results(
-                #                 OrderedDict([('%s frame' % (opt.name), frame_vis),
-                #                         ('%s inv_depth' % (opt.name), depth_vis)]),
-                #                         epoch)
+                if np.mod(step_num, opt.display_freq)==0:
+                    # frame_vis = frames.data[:,1,:,:,:].permute(0,2,3,1).contiguous().view(-1,opt.imW, 3).cpu().numpy().astype(np.uint8)
+                    # depth_vis = vis_depthmap(inv_depths.data[:,1,:,:].contiguous().view(-1,opt.imW).cpu()).numpy().astype(np.uint8)
+                    frame_vis_list = [frame.data.permute(1,2,0).contiguous().cpu().numpy().astype(np.uint8) for frame in frame_list]
+                    depth_vis_list = [(vis_depthmap(depth.data.cpu().numpy())*255).astype(np.uint8) for depth in inv_depth_list]
+                    print("Display: photometric_cost {:.3f}, smoothness_cost {:.3f}, cost {:.3f}".format(photometric_cost.data.cpu().item(),
+                            smoothness_cost.data.cpu().item(), cost.data.cpu().item()))
+                    warp_img_list = [img.cpu().numpy() for img in warp_img_list]
+                    warp_img_list = [img*255/(img.max()-img.min()+.00001) for img in warp_img_list]
+                    warp_img_list = [img.transpose((0,2,3,1)).astype(np.uint8) for img in warp_img_list]
+                    zeros = np.zeros(warp_img_list[0][0].shape)
+                    # visualizer.display_current_results(
+                    #                 OrderedDict([('%s frame' % (opt.name), frame_vis),
+                    #                         ('%s inv_depth' % (opt.name), depth_vis)]),
+                    #                         epoch)
 
-                left_vis = np.vstack([frame_vis_list[0], depth_vis_list[0], warp_img_list[0][0], zeros])
-                mid_vis = np.vstack([frame_vis_list[1], depth_vis_list[1], warp_img_list[1][0], warp_img_list[1][1]])
-                right_vis = np.vstack([frame_vis_list[2], depth_vis_list[2], warp_img_list[2][0], zeros])
-                result_vis = np.hstack([left_vis, mid_vis, right_vis]).astype(np.uint8)
-                save_image(result_vis, os.path.join(vis_dir, 'depth_%05d.png'%step_num))
-                # sio.savemat(os.path.join(opt.checkpoints_dir, 'depth_%s.mat' % (step_num)),
-                #     {'D': inv_depths.data.cpu().numpy(),
-                #      'I': frame_vis})
+                    left_vis = np.vstack([frame_vis_list[0], depth_vis_list[0], warp_img_list[0][0], zeros])
+                    mid_vis = np.vstack([frame_vis_list[1], depth_vis_list[1], warp_img_list[1][0], warp_img_list[1][1]])
+                    right_vis = np.vstack([frame_vis_list[2], depth_vis_list[2], warp_img_list[2][0], zeros])
+                    result_vis = np.hstack([left_vis, mid_vis, right_vis]).astype(np.uint8)
+                    save_image(result_vis, os.path.join(vis_dir, 'depth_%05d.png'%step_num))
+                    # sio.savemat(os.path.join(opt.checkpoints_dir, 'depth_%s.mat' % (step_num)),
+                    #     {'D': inv_depths.data.cpu().numpy(),
+                    #      'I': frame_vis})
 
-            if np.mod(step_num, opt.save_latest_freq)==0:
-                print("cache model....")
-                lkvolearner.save_model(os.path.join(opt.checkpoints_dir, '%s_model.pth' % (epoch)))
-                lkvolearner.cuda()
-                print('..... saved')
+                if np.mod(step_num, opt.save_latest_freq)==0:
+                    print("cache model....")
+                    lkvolearner.save_model(os.path.join(opt.checkpoints_dir, '%s_model.pth' % (epoch)))
+                    lkvolearner.cuda()
+                    print('..... saved')
 
-            if np.mod(step_num, opt.print_freq)==0:
-                print()
-        #eval
-        abs_rel, sq_rel, rms, log_rms, d1_all, a1, a2, a3 = \
-            validate(lkvolearner, opt.val_data_root_path, epoch, opt.vis_dir)
-        with open(test_csv, 'a') as csvfile:
-            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-            writer.writerow({'abs_rel': abs_rel, 'sq_rel': sq_rel, 'rms': rms,
-                'log_rms':log_rms, 'd1_all':d1_all,
-                'a1': a1, 'a2': a2, 'a3': a3})
-        if epoch%3==0 and epoch>0:
-            pre_train_dir = os.path.join(opt.vis_dir, "train_%02d"%(epoch-1))
-            pre_val_dir = os.path.join(opt.vis_dir, "val_%02d"%(epoch-1))
-            del_list = [pre_train_dir, pre_val_dir]
-            pre_train_dir = os.path.join(opt.vis_dir, "train_%02d"%(epoch-2))
-            pre_val_dir = os.path.join(opt.vis_dir, "val_%02d"%(epoch-2))
-            del_list.append(pre_train_dir)
-            del_list.append(pre_val_dir)
-            deldirs(del_list)
+                if np.mod(step_num, opt.print_freq)==0:
+                    print()
+
+        if rank==0:
+            #eval
+            abs_rel, sq_rel, rms, log_rms, d1_all, a1, a2, a3 = \
+                validate(lkvolearner, opt.val_data_root_path, epoch, opt.vis_dir)
+            with open(test_csv, 'a') as csvfile:
+                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+                writer.writerow({'abs_rel': abs_rel, 'sq_rel': sq_rel, 'rms': rms,
+                    'log_rms':log_rms, 'd1_all':d1_all,
+                    'a1': a1, 'a2': a2, 'a3': a3})
+            if epoch%3==0 and epoch>0:
+                pre_train_dir = os.path.join(opt.vis_dir, "train_%02d"%(epoch-1))
+                pre_val_dir = os.path.join(opt.vis_dir, "val_%02d"%(epoch-1))
+                del_list = [pre_train_dir, pre_val_dir]
+                pre_train_dir = os.path.join(opt.vis_dir, "train_%02d"%(epoch-2))
+                pre_val_dir = os.path.join(opt.vis_dir, "val_%02d"%(epoch-2))
+                del_list.append(pre_train_dir)
+                del_list.append(pre_val_dir)
+                deldirs(del_list)
+
+    link.finalize()
 
 if __name__=='__main__':
     main()

@@ -10,6 +10,8 @@ Variable = torch.autograd.Variable
 
 from timeit import default_timer as timer
 
+from distributed_utils import dist_init, reduce_gradients, DistModule
+
 class FlipLR(nn.Module):
     def __init__(self, imW, dim_w):
         super(FlipLR, self).__init__()
@@ -26,7 +28,10 @@ class FlipLR(nn.Module):
 class LKVOLearner(nn.Module):
     def __init__(self, img_size=[128, 416], ref_frame_idx=1, lambda_S=.5, use_ssim=True, smooth_term = 'lap', gpu_ids=[0]):
         super(LKVOLearner, self).__init__()
-        self.lkvo = nn.DataParallel(LKVOKernel(img_size, smooth_term = smooth_term), device_ids=gpu_ids)
+        # self.lkvo = nn.DataParallel(LKVOKernel(img_size, smooth_term = smooth_term), device_ids=gpu_ids)
+        self.lkvo = LKVOKernel(img_size, smooth_term = smooth_term)
+        self.lkvo = self.lkvo.cuda()
+        self.lkvo = DistModule(self.lkvo)
         self.ref_frame_idx = ref_frame_idx
         self.lambda_S = lambda_S
         self.use_ssim = use_ssim
@@ -67,7 +72,7 @@ class LKVOKernel(nn.Module):
         self.img_size = img_size
         self.fliplr_func = FlipLR(imW=img_size[1], dim_w=3)
         self.vo = DirectVO(imH=img_size[0], imW=img_size[1], pyramid_layer_num=5)
-        self.old_vo = DirectVOOld(imH=img_size[0], imW=img_size[1], pyramid_layer_num=5)
+        # self.old_vo = DirectVOOld(imH=img_size[0], imW=img_size[1], pyramid_layer_num=5)
         self.pose_net = PoseNet(3)
         self.depth_net = VggDepthEstimator(img_size)
         self.pyramid_func = ImagePyramidLayer(chan=1, pyramid_layer_num=5)
