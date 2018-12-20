@@ -1,4 +1,40 @@
 # Learning Depth from Monocular Videos using Direct Methods
+
+
+## 代码修改记录
+
+- master
+
+添加batch以及linklink功能，正在进行baseline训练
+
+- old_master
+
+最初的master，没有什么改动
+
+- add-kpts
+
+之前添加kpts的功能，同时还有可视化图片、val以及保存图片的功能
+
+- obso-multi-batch，obso-re-all-multi-batch，obso-multigpu，obso-linklink，obso-all-multi-batch，obso-dataparallel，batched-depth-pred,obbso-multi-batch-2
+
+都是添加multi-batch时候的中间branch，后来都没有用了
+
+- obso-disable-ddvo
+
+之前尝试把ddvl反传去掉，后来没有意义了
+
+- naive-nonlocal
+在add-kpts基础上添加nonlocal，只支持一个batch，暂时的结果并不好
+
+- baseline
+在add-kpts后面检测posenet+ddvo的baseline用的
+
+- essential-method
+尝试使用直接法的一个branch，具体目的忘了
+
+
+
+
 <img align="center" src="https://github.com/MightyChaos/MightyChaos.github.io/blob/master/projects/cvpr18_chaoyang/demo.gif">
 
 Implementation of the methods in "[Learning Depth from Monocular Videos using Direct Methods](http://openaccess.thecvf.com/content_cvpr_2018/papers/Wang_Learning_Depth_From_CVPR_2018_paper.pdf)".
@@ -17,7 +53,7 @@ year = {2018}
 - Python 3.6
 - PyTorch 0.3.1  (latter or eariler version of Pytorch is non-compatible.)
 
-- visdom, dominate 
+- visdom, dominate
 
 
 ## Training
