@@ -24,22 +24,21 @@ class FlipLR(nn.Module):
 
 
 class LKVOLearner(nn.Module):
-    def __init__(self, img_size=[128, 416], ref_frame_idx=1, lambda_S=.5, lambda_K=1, use_ssim=True, smooth_term = 'lap', gpu_ids=[0]):
+    def __init__(self, img_size=[128, 416], ref_frame_idx=1, lambda_S=.5, use_ssim=True, smooth_term = 'lap', gpu_ids=[0]):
         super(LKVOLearner, self).__init__()
         self.lkvo = nn.DataParallel(LKVOKernel(img_size, smooth_term = smooth_term), device_ids=gpu_ids)
         self.ref_frame_idx = ref_frame_idx
         self.lambda_S = lambda_S
-        self.lambda_K = lambda_K
         self.use_ssim = use_ssim
 
-    def forward(self, frames, camparams, kpts, max_lk_iter_num=10, lk_level=1):
-        cost, photometric_cost, smoothness_cost, kpts_cost, ref_inv_depth, \
+    def forward(self, frames, camparams, max_lk_iter_num=10, lk_level=1):
+        cost, photometric_cost, smoothness_cost, ref_inv_depth, \
             frame_save, depth_save, warp_img_save \
-            = self.lkvo.forward(frames, camparams, kpts, self.ref_frame_idx, \
-                                self.lambda_S, self.lambda_K, max_lk_iter_num=max_lk_iter_num, \
+            = self.lkvo.forward(frames, camparams, self.ref_frame_idx, \
+                                self.lambda_S, max_lk_iter_num=max_lk_iter_num, \
                                 use_ssim=self.use_ssim, lk_level=lk_level)
         return cost.mean(), photometric_cost.mean(), smoothness_cost.mean(), \
-                kpts_cost.mean(), ref_inv_depth, \
+                ref_inv_depth, \
                 frame_save, depth_save, warp_img_save
 
     def save_model(self, file_path):
@@ -74,63 +73,8 @@ class LKVOKernel(nn.Module):
         self.pyramid_func = ImagePyramidLayer(chan=1, pyramid_layer_num=5)
         self.smooth_term = smooth_term
 
-    def compute_kpts_diff(self, inv_depth_norm, kpts, trans_batch):
-        # only support 3 frames
-        b, ref_num, _, kpt_num = kpts.shape[:4]
-        h, w = inv_depth_norm.shape[-2:]
-        inv_depth_batch = torch.cat((inv_depth_norm[:,0:1], inv_depth_norm[:,1:2], inv_depth_norm[:,2:3], inv_depth_norm[:,1:2]), dim=1)
-        # src1, ref1, src2, ref2
-        kpts = torch.reshape(kpts, (b, ref_num*2, kpt_num,2)).long()
-        inv_depth_batch = inv_depth_batch.view(b*ref_num*2, h, w)
-        kpts = kpts.view(b*ref_num*2, kpt_num, 2)
-        kpts_depth = []
-        for i in range(ref_num*2):
-            depth = inv_depth_batch[i]
-            kpt = kpts[i]
-            col_select = torch.index_select(depth, 1, kpt[:,0])
-            row_select = torch.index_select(col_select, 0, kpt[:,1])
-            kpt_depth = row_select.diag()
-            # st()
-            kpts_depth.append(kpt_depth)
-        kpts_depth = torch.stack(kpts_depth)
-        trans_batch = trans_batch.view(b*ref_num, 3)
-        for i in range(ref_num):
-            kpts_depth[i*2,:]-=trans_batch[i,2]
-        diff = []
-        for i in range(ref_num):
-            diff.append((kpts_depth[i*2,:]-kpts_depth[i*2+1,:]).abs())
-        diff = torch.stack(diff)
-        diff_mean = diff.mean()
-        return diff_mean
 
-    def check_kpts_diff(self, inv_depth_norm, kpts, trans_batch):
-        ref_num, _, kpt_num = kpts.shape[:3]
-        assert ref_num == trans_batch.shape[0]
-        inv_depth_norm = inv_depth_norm.unsqueeze(0)
-        inv_depth_batch = torch.cat((inv_depth_norm[:,0], inv_depth_norm[:,1], inv_depth_norm[:,2], inv_depth_norm[:,1]))
-        # src1, ref1, src2, ref2
-        kpts = torch.reshape(kpts, (ref_num*2, kpt_num,2)).long()
-        kpts_depth = []
-        for i in range(ref_num):
-            depth_src = inv_depth_batch[2*i]
-            kpt_src = kpts[2*i]
-            depth_ref = inv_depth_batch[2*i+1]
-            kpt_ref = kpts[2*i+1]
-            kpt_diff = []
-            for j in range(kpt_num):
-                u_src, v_src = kpt_src[j]
-                u_ref, v_ref = kpt_ref[j]
-                d_src = depth_src[v_src, u_src]
-                d_ref = depth_ref[v_ref, u_ref]
-                d_src-=trans_batch[i,2]
-                kpt_diff.append(( d_src - d_ref ).abs())
-            kpt_diff = torch.stack(kpt_diff)
-            kpts_depth.append(kpt_diff)
-        kpts_depth = torch.stack(kpts_depth)
-        mean = kpts_depth.mean()
-        return mean
-
-    def forward(self, frames, camparams, kpts, ref_frame_idx, lambda_S=.5, lambda_K=1, do_data_augment=True, use_ssim=True, max_lk_iter_num=10, lk_level=1):
+    def forward(self, frames, camparams, ref_frame_idx, lambda_S=.5, lambda_K=1, do_data_augment=True, use_ssim=True, max_lk_iter_num=10, lk_level=1):
         # assert(frames.size(0) == 1 and frames.dim() == 5)
         b, bundle_size, c, h, w  = frames.shape
 
@@ -271,7 +215,7 @@ class LKVOKernel(nn.Module):
 
         smoothness_cost = self.vo.multi_scale_image_aware_smoothness_cost(inv_depth0_pyramid, frames_pyramid, levels=[2,3], type=self.smooth_term) \
                             + self.vo.multi_scale_image_aware_smoothness_cost(inv_depth_norm_pyramid, frames_pyramid, levels=[2,3], type=self.smooth_term)
-        kpts_cost = self.compute_kpts_diff(inv_depth_norm_pyramid[0], kpts, batch_trans)
+
         # kpts_cost_check = self.check_kpts_diff(inv_depth_norm_pyramid[0], kpts, trans_batch)
         # print(kpts_cost)
         # print(kpts_cost_check)
@@ -286,12 +230,12 @@ class LKVOKernel(nn.Module):
         # st()
 
         # cost = photometric_cost + photometric_cost0 + reproj_cost + reproj_cost0 + lambda_S*smoothness_cost
-        cost = photometric_cost + lambda_S*smoothness_cost + lambda_K*kpts_cost
+        cost = photometric_cost + lambda_S*smoothness_cost
 
         frame_save = [frames[0][i] for i in range(3)]
         depth_save = [inv_depth0_pyramid[0][0][i] for i in range(3)]
 
-        return cost, photometric_cost, smoothness_cost, kpts_cost, \
+        return cost, photometric_cost, smoothness_cost, \
                 inv_depth0_pyramid[0].view(b*bundle_size, h, w)*inv_depth_mean_ten.unsqueeze(-1).unsqueeze(-1), \
                 frame_save, depth_save, warp_img_save
 

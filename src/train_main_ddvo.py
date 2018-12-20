@@ -99,7 +99,7 @@ def main():
 
 
     lkvolearner = LKVOLearner(img_size=img_size, ref_frame_idx=1, lambda_S=opt.lambda_S,
-            lambda_K = opt.lambda_K, gpu_ids = gpu_ids, smooth_term = opt.smooth_term,
+            gpu_ids = gpu_ids, smooth_term = opt.smooth_term,
             use_ssim=opt.use_ssim)
     lkvolearner.init_weights()
 
@@ -133,10 +133,9 @@ def main():
             optimizer.zero_grad()
             frames = Variable(data[0].float().cuda())
             camparams = Variable(data[1])
-            kpts = Variable(data[2]).cuda()
-            cost, photometric_cost, smoothness_cost, kpts_cost, inv_depths, \
+            cost, photometric_cost, smoothness_cost, inv_depths, \
             frame_list, inv_depth_list, warp_img_list = \
-                lkvolearner.forward(frames, camparams, kpts, \
+                lkvolearner.forward(frames, camparams, \
                                     max_lk_iter_num=opt.max_lk_iter_num, \
                                     lk_level=opt.lk_level)
             # print(frames.size())
@@ -168,7 +167,6 @@ def main():
 
                 logger.add_scalar('train/photo', photometric_cost.data.cpu().item(), step_num)
                 logger.add_scalar('train/smooth',smoothness_cost.data.cpu().item(), step_num)
-                logger.add_scalar('train/kpt', kpts_cost.cpu().item(), step_num)
                 logger.add_scalar('train/cost', cost.data.cpu().item(), step_num)
 
             if np.mod(step_num, opt.display_freq)==0:
