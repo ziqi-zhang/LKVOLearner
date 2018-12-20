@@ -145,7 +145,7 @@ class LKVOKernel(nn.Module):
             if np.random.rand()>.5:
                 # print("fliplr")
                 frames = self.fliplr_func(frames)
-                camparams[:2] = self.img_size[1] - camparams[:2]
+                camparams[:,2] = self.img_size[1] - camparams[:,2]
                 # camparams[5] = self.img_size[0] - camparams[5]
 
         inv_depth_pyramid = self.depth_net.forward((frames-127)/127)
