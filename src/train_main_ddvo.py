@@ -126,7 +126,7 @@ def main():
 
     ref_frame_idx = 1
 
-    optimizer = optim.Adam(lkvolearner.get_parameters(), lr=.0001)
+    optimizer = optim.Adam(lkvolearner.get_parameters(), lr=opt.lr)
 
     step_num = 0
 
