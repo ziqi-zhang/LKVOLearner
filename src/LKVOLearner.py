@@ -1,5 +1,4 @@
 from DirectVOLayer import DirectVO
-from DirectVOLayerOld import DirectVO as DirectVOOld
 from networks import VggDepthEstimator, PoseNet
 from ImagePyramid import ImagePyramidLayer
 import torch.nn as nn
@@ -31,7 +30,9 @@ class LKVOLearner(nn.Module):
         # self.lkvo = nn.DataParallel(LKVOKernel(img_size, smooth_term = smooth_term), device_ids=gpu_ids)
         self.lkvo = LKVOKernel(img_size, smooth_term = smooth_term)
         self.lkvo = self.lkvo.cuda()
+        print("DistModule")
         self.lkvo = DistModule(self.lkvo)
+        print("DistModule succeed")
         self.ref_frame_idx = ref_frame_idx
         self.lambda_S = lambda_S
         self.use_ssim = use_ssim

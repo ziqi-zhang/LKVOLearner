@@ -30,7 +30,7 @@ class BaseOptions():
         self.parser.add_argument('--dist', default=False, action='store_true')
         self.parser.add_argument('--port', default='23461')
 
-    def parse(self):
+    def parse(self, rank):
         if not self.initialized:
             self.initialize()
         self.opt = self.parser.parse_args()
@@ -49,22 +49,23 @@ class BaseOptions():
 
         args = vars(self.opt)
 
-        print('------------ Options -------------')
-        for k, v in sorted(args.items()):
-            print('%s: %s' % (str(k), str(v)))
-        print('-------------- End ----------------')
-
-        # save to the disk
-        self.opt.vis_dir = os.path.join(self.opt.checkpoints_dir, 'vis')
-        util.mkdir(self.opt.vis_dir)
-        self.opt.tf_log_dir = os.path.join(self.opt.checkpoints_dir, 'tensorboard')
-        util.mkdir(self.opt.tf_log_dir)
-        expr_dir = os.path.join(self.opt.checkpoints_dir, self.opt.name)
-        util.mkdirs(expr_dir)
-        file_name = os.path.join(expr_dir, 'opt.txt')
-        with open(file_name, 'wt') as opt_file:
-            opt_file.write('------------ Options -------------\n')
+        if rank==0:
+            print('------------ Options -------------')
             for k, v in sorted(args.items()):
-                opt_file.write('%s: %s\n' % (str(k), str(v)))
-            opt_file.write('-------------- End ----------------\n')
+                print('%s: %s' % (str(k), str(v)))
+            print('-------------- End ----------------')
+
+            # save to the disk
+            self.opt.vis_dir = os.path.join(self.opt.checkpoints_dir, 'vis')
+            util.mkdir(self.opt.vis_dir)
+            self.opt.tf_log_dir = os.path.join(self.opt.checkpoints_dir, 'tensorboard')
+            util.mkdir(self.opt.tf_log_dir)
+            expr_dir = os.path.join(self.opt.checkpoints_dir, self.opt.name)
+            util.mkdirs(expr_dir)
+            file_name = os.path.join(expr_dir, 'opt.txt')
+            with open(file_name, 'wt') as opt_file:
+                opt_file.write('------------ Options -------------\n')
+                for k, v in sorted(args.items()):
+                    opt_file.write('%s: %s\n' % (str(k), str(v)))
+                opt_file.write('-------------- End ----------------\n')
         return self.opt

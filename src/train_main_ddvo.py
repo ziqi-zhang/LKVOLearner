@@ -86,7 +86,7 @@ def validate(lkvolearner, dataset_root, epoch, vis_dir=None,
 def main():
     rank, world_size = dist_init()
 
-    opt = TrainOptions().parse()
+    opt = TrainOptions().parse(rank)
     if rank==0:
         logger = Logger(opt.tf_log_dir)
     img_size = [opt.imH, opt.imW]
