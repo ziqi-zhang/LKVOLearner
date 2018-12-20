@@ -25,14 +25,10 @@ class FlipLR(nn.Module):
 
 
 class LKVOLearner(nn.Module):
-    def __init__(self, img_size=[128, 416], ref_frame_idx=1, lambda_S=.5, use_ssim=True, smooth_term = 'lap', gpu_ids=[0]):
+    def __init__(self, img_size=[128, 416], ref_frame_idx=1, lambda_S=.5, use_ssim=True, smooth_term = 'lap'):
         super(LKVOLearner, self).__init__()
         # self.lkvo = nn.DataParallel(LKVOKernel(img_size, smooth_term = smooth_term), device_ids=gpu_ids)
         self.lkvo = LKVOKernel(img_size, smooth_term = smooth_term)
-        self.lkvo = self.lkvo.cuda()
-        print("DistModule")
-        self.lkvo = DistModule(self.lkvo)
-        print("DistModule succeed")
         self.ref_frame_idx = ref_frame_idx
         self.lambda_S = lambda_S
         self.use_ssim = use_ssim
@@ -53,14 +49,18 @@ class LKVOLearner(nn.Module):
         self.cuda()
 
     def load_model(self, depth_net_file_path, pose_net_file_path):
-        self.lkvo.module.depth_net.load_state_dict(torch.load(depth_net_file_path))
-        self.lkvo.module.pose_net.load_state_dict(torch.load(pose_net_file_path))
+        self.lkvo.depth_net.load_state_dict(torch.load(depth_net_file_path))
+        self.lkvo.pose_net.load_state_dict(torch.load(pose_net_file_path))
 
     def init_weights(self):
-        self.lkvo.module.depth_net.init_weights()
+        self.lkvo.depth_net.init_weights()
 
     def get_parameters(self):
         return self.lkvo.module.depth_net.parameters()
+
+    def dist_model(self):
+        self.lkvo = self.lkvo.cuda()
+        self.lkvo = DistModule(self.lkvo)
 
 
 

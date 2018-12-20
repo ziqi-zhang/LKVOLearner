@@ -102,11 +102,10 @@ def main():
     dataloader = DataLoader(dataset, batch_size=opt.batchSize,
                             shuffle=False, num_workers=opt.nThreads, pin_memory=True)
 
-    gpu_ids = list(range(torch.cuda.device_count()))
 
 
     lkvolearner = LKVOLearner(img_size=img_size, ref_frame_idx=1, lambda_S=opt.lambda_S,
-            gpu_ids = gpu_ids, smooth_term = opt.smooth_term,
+            smooth_term = opt.smooth_term,
             use_ssim=opt.use_ssim)
     lkvolearner.init_weights()
 
@@ -122,6 +121,8 @@ def main():
                             os.path.join(opt.checkpoints_dir, 'pose_net.pth'))
 
     # lkvolearner.cuda()
+    lkvolearner.dist_model()
+
 
     ref_frame_idx = 1
 
@@ -139,7 +140,7 @@ def main():
         for ii, data in enumerate(dataloader):
             optimizer.zero_grad()
             frames = Variable(data[0].float().cuda())
-            camparams = Variable(data[1])
+            camparams = Variable(data[1].float().cuda())
             cost, photometric_cost, smoothness_cost, inv_depths, \
             frame_list, inv_depth_list, warp_img_list = \
                 lkvolearner.forward(frames, camparams, \
