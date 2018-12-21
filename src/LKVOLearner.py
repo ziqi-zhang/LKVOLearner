@@ -44,9 +44,9 @@ class LKVOLearner(nn.Module):
                 frame_save, depth_save, warp_img_save
 
     def save_model(self, file_path):
-        torch.save(self.cpu().lkvo.module.depth_net.state_dict(),
+        torch.save(self.lkvo.module.depth_net.state_dict(),
             file_path)
-        self.cuda()
+        # self.lkvo.module.cuda()
 
     def load_model(self, depth_net_file_path, pose_net_file_path):
         self.lkvo.depth_net.load_state_dict(torch.load(depth_net_file_path))
