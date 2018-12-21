@@ -30,7 +30,7 @@ from util.util import *
 from PIL import Image
 from multiprocessing import Pool
 fieldnames = ['abs_rel', 'sq_rel', 'rms', 'log_rms', 'd1_all',
-                'a1', 'a2', 'a3']
+                'a1', 'a2', 'a3', 'lr']
 
 import linklink as link
 from distributed_utils import dist_init, reduce_gradients, DistModule, DistributedSampler
@@ -223,7 +223,7 @@ def main():
                 writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
                 writer.writerow({'abs_rel': abs_rel, 'sq_rel': sq_rel, 'rms': rms,
                     'log_rms':log_rms, 'd1_all':d1_all,
-                    'a1': a1, 'a2': a2, 'a3': a3})
+                    'a1': a1, 'a2': a2, 'a3': a3, 'lr': opt.lr})
             if epoch%3==0 and epoch>0:
                 pre_train_dir = os.path.join(opt.vis_dir, "train_%02d"%(epoch-1))
                 pre_val_dir = os.path.join(opt.vis_dir, "val_%02d"%(epoch-1))
@@ -235,6 +235,16 @@ def main():
                 deldirs(del_list)
 
     link.finalize()
+
+def adjust_learning_rate(optimizer, epoch):
+    """Sets the learning rate to half at 5 epochs, to quarter at 8 epoch"""
+    if not opt.fix_lr:
+        if epoch==5 or epoch==8:
+            opt.lr = opr.lr / 2
+            print("Adjust learning rate = {}".format(opt.lr))
+            for param_group in optimizer.param_groups:
+                param_group['lr'] = opt.lr
+
 
 if __name__=='__main__':
     main()
