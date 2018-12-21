@@ -128,9 +128,12 @@ def main():
 
     ref_frame_idx = 1
 
+    if opt.lr>0.0001:
+        opt.lr = 0.0001
     optimizer = optim.Adam(lkvolearner.get_parameters(), lr=opt.lr)
 
     step_num = 0
+
 
 
     for epoch in range(max(0, opt.which_epoch), opt.epoch_num+1):
@@ -138,7 +141,10 @@ def main():
             vis_dir = os.path.join(opt.vis_dir, "train_%02d"%epoch)
             mkdir(vis_dir)
             t = timer()
+        adjust_learning_rate(optimizer, epoch, opt)
+
         for ii, data in enumerate(dataloader):
+            break
             optimizer.zero_grad()
             frames = Variable(data[0].float().cuda())
             camparams = Variable(data[1].float().cuda())
@@ -236,11 +242,11 @@ def main():
 
     link.finalize()
 
-def adjust_learning_rate(optimizer, epoch):
+def adjust_learning_rate(optimizer, epoch, opt):
     """Sets the learning rate to half at 5 epochs, to quarter at 8 epoch"""
     if not opt.fix_lr:
         if epoch==5 or epoch==8:
-            opt.lr = opr.lr / 2
+            opt.lr = opt.lr / 2
             print("Adjust learning rate = {}".format(opt.lr))
             for param_group in optimizer.param_groups:
                 param_group['lr'] = opt.lr
