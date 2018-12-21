@@ -144,7 +144,6 @@ def main():
         adjust_learning_rate(optimizer, epoch, opt)
 
         for ii, data in enumerate(dataloader):
-            break
             optimizer.zero_grad()
             frames = Variable(data[0].float().cuda())
             camparams = Variable(data[1].float().cuda())
