@@ -115,12 +115,11 @@ def main():
     if opt.which_epoch >= 0:
         print("load pretrained model")
         # lkvolearner.load_model(os.path.join(opt.checkpoints_dir, '%s_model.pth' % (opt.which_epoch)))
-        lkvolearner.load_model(os.path.join(opt.checkpoints_dir, '%s_model.pth' % (opt.which_epoch)),
+        lkvolearner.load_pretrain_model(os.path.join(opt.checkpoints_dir, '%s_model.pth' % (opt.which_epoch)),
                             os.path.join(opt.checkpoints_dir, 'pose_net.pth'))
     else:
         print("load pretrained models")
-        lkvolearner.load_model(os.path.join(opt.checkpoints_dir, 'depth_net.pth'),
-                            os.path.join(opt.checkpoints_dir, 'pose_net.pth'))
+        lkvolearner.load_posenet_model(os.path.join(opt.checkpoints_dir, 'pose_net.pth'))
 
     # lkvolearner.cuda()
     lkvolearner.dist_model()

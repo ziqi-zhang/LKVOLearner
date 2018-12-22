@@ -48,8 +48,11 @@ class LKVOLearner(nn.Module):
             file_path)
         # self.lkvo.module.cuda()
 
-    def load_model(self, depth_net_file_path, pose_net_file_path):
+    def load_pretrain_model(self, depth_net_file_path, pose_net_file_path):
         self.lkvo.depth_net.load_state_dict(torch.load(depth_net_file_path))
+        self.lkvo.pose_net.load_state_dict(torch.load(pose_net_file_path))
+
+    def load_posenet_model(self, pose_net_file_path):
         self.lkvo.pose_net.load_state_dict(torch.load(pose_net_file_path))
 
     def init_weights(self):
