@@ -15,7 +15,7 @@ from LKVOLearner import LKVOLearner
 from KITTIdataset import KITTIdataset
 from testKITTI import predKITTI
 from util.eval_depth import evaluate
-from util.depth_visualize import vis_depthmap
+from util.depth_visualize import *
 
 from collections import OrderedDict
 from options.train_options import TrainOptions
@@ -196,14 +196,21 @@ def main():
                     warp_img_list = [img*255/(img.max()-img.min()+.00001) for img in warp_img_list]
                     warp_img_list = [img.transpose((0,2,3,1)).astype(np.uint8) for img in warp_img_list]
                     zeros = np.zeros(warp_img_list[0][0].shape)
-                    # visualizer.display_current_results(
-                    #                 OrderedDict([('%s frame' % (opt.name), frame_vis),
-                    #                         ('%s inv_depth' % (opt.name), depth_vis)]),
-                    #                         epoch)
 
-                    left_vis = np.vstack([frame_vis_list[0], depth_vis_list[0], warp_img_list[0][0], zeros])
-                    mid_vis = np.vstack([frame_vis_list[1], depth_vis_list[1], warp_img_list[1][0], warp_img_list[1][1]])
-                    right_vis = np.vstack([frame_vis_list[2], depth_vis_list[2], warp_img_list[2][0], zeros])
+                    warp_error_0 = vis_warp_error(frame_vis_list[0], warp_img_list[0][0])
+                    warp_error_10 = vis_warp_error(frame_vis_list[1], warp_img_list[1][0])
+                    warp_error_11 = vis_warp_error(frame_vis_list[1], warp_img_list[1][1])
+                    warp_error_2 = vis_warp_error(frame_vis_list[2], warp_img_list[2][0])
+                    
+                    left_vis = np.vstack([frame_vis_list[0], depth_vis_list[0], \
+                                            warp_img_list[0][0], zeros, \
+                                            warp_error_0, zeros])
+                    mid_vis = np.vstack([frame_vis_list[1], depth_vis_list[1], \
+                                            warp_img_list[1][0], warp_img_list[1][1], \
+                                            warp_error_10, warp_error_11])
+                    right_vis = np.vstack([frame_vis_list[2], depth_vis_list[2], \
+                                            warp_img_list[2][0], zeros, \
+                                            warp_error_2, zeros])
                     result_vis = np.hstack([left_vis, mid_vis, right_vis]).astype(np.uint8)
                     save_image(result_vis, os.path.join(vis_dir, 'depth_%05d.png'%step_num))
                     # sio.savemat(os.path.join(opt.checkpoints_dir, 'depth_%s.mat' % (step_num)),
