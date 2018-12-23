@@ -69,6 +69,7 @@ def validate(lkvolearner, dataset_root, epoch, vis_dir=None,
                 img_size=[128, 416]):
 
     vgg_depth_net = lkvolearner.lkvo.module.depth_net
+    vgg_depth_net.vis_attention = True
     test_file_list = os.path.join(dataset_root, 'list', 'eigen_test_files.txt')
     print("Predicting validate set")
     pred_depths, raw_images, conv_map, upconv_map = predKITTI(vgg_depth_net, dataset_root, test_file_list, img_size,

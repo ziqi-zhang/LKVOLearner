@@ -117,7 +117,8 @@ class VggDepthEstimator(nn.Module):
                 m.bias.data = torch.zeros(m.bias.data.size())
 
         self.apply(weights_init)
-        def extract_attention_map(self):
+
+    def extract_attention_map(self):
         conv_map = []
         for feat in self.conv_feats:
             conv_map.append(torch.max(feat, 1)[0])

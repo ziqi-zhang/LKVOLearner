@@ -1,6 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from pdb import set_trace as st
+import torch
 
 def gray2rgb(im, cmap='plasma'):
     cmap = plt.get_cmap(cmap)
@@ -30,10 +31,10 @@ def image_range_to_255(input):
     x = (input-input.min()) * (255/(input.max()-input.min()+.00001))
     return x
 
-def gray2attention_map(im, cmap='seismic'):
+def single2attention_map(im, cmap='seismic'):
     cmap = plt.get_cmap(cmap)
     rgba_img = cmap(im.astype(np.float32))
-    rgb_img = np.delete(rgba_img, 3, 3)
+    rgb_img = np.delete(rgba_img, 3, -1)
     return np.squeeze(rgb_img)
 
 def tensor2numpy(tensor):
@@ -43,8 +44,21 @@ def tensor2numpy(tensor):
     else:
         return tensor.cpu().numpy()
 
+def single2gray(im):
+    im = np.expand_dims(im, axis=2)
+    im = np.repeat(im, 3, axis=2)
+    return im
+
 def feat_map2rgb(feat):
-    im = tensor2numpy(feat)
-    im = gray2attention_map(im)
+    # im = tensor2numpy(feat)
+    im = single2attention_map(feat)
+    im = image_range_to_255(im)
+
+    # im = single2gray(feat)
+    # im = image_range_to_255(im)
+    return im
+
+def feat_map2gray(feat):
+    im = single2gray(feat)
     im = image_range_to_255(im)
     return im

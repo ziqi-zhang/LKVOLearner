@@ -16,6 +16,8 @@ def evaluate(pred_depths, test_file_list, data_dir, min_depth=1e-2, max_depth=80
     gt_depths = []
     pred_depths_resized = []
     for t_id in range(num_test):
+        if t_id>3:
+            break
         camera_id = cams[t_id]  # 2 is left, 3 is right
         pred_depths_resized.append(
             cv2.resize(pred_depths[t_id],
@@ -41,6 +43,8 @@ def evaluate(pred_depths, test_file_list, data_dir, min_depth=1e-2, max_depth=80
 
     error_maps = []
     for i in range(num_test):
+        if i>3:
+            break
         gt_depth = gt_depths[i]
         pred_depth = np.copy(pred_depths[i])
 

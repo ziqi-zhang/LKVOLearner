@@ -8,6 +8,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 import argparse
 from pdb import set_trace
+import cv2
+
+from util.depth_visualize import *
 
 def colored_depthmap(depth, d_min=None, d_max=None):
     import matplotlib.pyplot as plt
@@ -73,6 +76,41 @@ def main():
         # plt.imshow(pred_depth_pyramid[0].data.cpu().squeeze().numpy())
         # plt.show()
 
+def vis_heat_map(conv_map, upconv_map, img_size):
+    conv_map_vis = []
+    for i, map_rgb in enumerate(conv_map):
+        map_rgb = tensor2numpy(map_rgb)
+        if map_rgb.ndim==3:
+            map_rgb = map_rgb[1]
+        map_rgb = map_rgb.squeeze()
+        map_rgb = cv2.resize(map_rgb, (img_size[1], img_size[0]), interpolation=cv2.INTER_NEAREST)
+        if i<2:
+            map_rgb = feat_map2gray(map_rgb)
+        else:
+            map_rgb = feat_map2gray(map_rgb)
+        # use_pp, map_rgb[1] is the original image
+        # map_rgb = np.resize(map_rgb, (img_size[0], img_size[1], 3))
+
+        conv_map_vis.append(map_rgb)
+
+    upconv_map_vis = []
+    for i, map_rgb in enumerate(upconv_map):
+        map_rgb = tensor2numpy(map_rgb)
+        if map_rgb.ndim==3:
+            map_rgb = map_rgb[1]
+        map_rgb = map_rgb.squeeze()
+        map_rgb = cv2.resize(map_rgb, (img_size[1], img_size[0]), interpolation=cv2.INTER_NEAREST)
+        if i>4:
+            map_rgb = feat_map2gray(map_rgb)
+        else:
+            map_rgb = feat_map2gray(map_rgb)
+        # map_rgb = np.resize(map_rgb, (img_size[0], img_size[1], 3))
+
+        upconv_map_vis.append(map_rgb)
+
+    return conv_map_vis, upconv_map_vis
+
+
 def predKITTI(model, dataset_root, test_file_list, img_size=[128, 416],
                 vis_dir=None, use_pp=True):
     print("Begin test KITTI")
@@ -82,6 +120,8 @@ def predKITTI(model, dataset_root, test_file_list, img_size=[128, 416],
     test_files = read_text_lines(test_file_list)
     pred_disp = []
     raw_images = []
+    conv_map_list = []
+    upconv_map_list = []
     i = 0
     for filename in test_files:
         filename = filename.split()[0]
@@ -100,7 +140,7 @@ def predKITTI(model, dataset_root, test_file_list, img_size=[128, 416],
         if use_pp:
             # flip image
             img_vars = (torch.cat((fliplr(img_var).unsqueeze(0), img_var.unsqueeze(0)), 0)-127)/127
-            pred_disp_pyramid = model.forward(img_vars)
+            pred_disp_pyramid, conv_map, upconv_map = model.forward(img_vars)
             disp = pred_disp_pyramid[0]
             # print(depth.size())
             disp_mean = (fliplr(disp[0:1, :, :]) + disp[1:2, :, :])*.5
@@ -108,7 +148,7 @@ def predKITTI(model, dataset_root, test_file_list, img_size=[128, 416],
             pred_disp.append(disp_mean)
             # compute mean
         else:
-            pred_disp_pyramid = model.forward((img_var.unsqueeze(0)-127)/127)
+            pred_disp_pyramid, conv_map, upconv_map = model.forward((img_var.unsqueeze(0)-127)/127)
             pred_disp.append(pred_disp_pyramid[0].data.cpu().squeeze().numpy())
         if vis_dir is not None:
             disp_vis = colored_depthmap(pred_disp[-1])
@@ -118,11 +158,18 @@ def predKITTI(model, dataset_root, test_file_list, img_size=[128, 416],
             Image.fromarray(vis_img).save(vis_file_path)
 
         # set_trace()
+        conv_map_vis, upconv_map_vis = vis_heat_map(conv_map, upconv_map, img_size)
+        conv_map_vis = np.vstack(conv_map_vis)
+        upconv_map_vis = np.vstack(upconv_map_vis)
+        conv_map_list.append(np.asarray(conv_map_vis))
+        upconv_map_list.append(np.asarray(upconv_map_vis))
         i = i+1
+        if i>3:
+            break
 
     pred_disp = np.asarray(pred_disp)
     raw_images = np.asarray(raw_images)
-    return 1/pred_disp, raw_images
+    return 1/pred_disp, raw_images, conv_map_list, upconv_map_list
 
 if __name__=='__main__':
     main()
