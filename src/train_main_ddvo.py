@@ -53,13 +53,25 @@ def save_val_images(data):
         img = img.astype(np.uint8)
         save_image(img, img_path)
 
+def save_attention_images(data):
+    i, (depth, raw_img, conv_map, upconv_map, val_vis_dir) = data
+    zeros = np.zeros(raw_img.shape)
+    depth = vis_depthmap(1/depth)*255
+    zero_pads = [zeros for i in range(7-2)]
+    img_path = os.path.join(val_vis_dir, "%03d_att.png"%i)
+    img = np.vstack([raw_img, depth]+zero_pads)
+    img = np.hstack((img, conv_map, upconv_map))
+    img = img.astype(np.uint8)
+    save_image(img, img_path)
+
+
 def validate(lkvolearner, dataset_root, epoch, vis_dir=None,
                 img_size=[128, 416]):
 
     vgg_depth_net = lkvolearner.lkvo.module.depth_net
     test_file_list = os.path.join(dataset_root, 'list', 'eigen_test_files.txt')
     print("Predicting validate set")
-    pred_depths, raw_images = predKITTI(vgg_depth_net, dataset_root, test_file_list, img_size,
+    pred_depths, raw_images, conv_map, upconv_map = predKITTI(vgg_depth_net, dataset_root, test_file_list, img_size,
                 use_pp=True)
 
     # pred_depths = np.zeros((697, 128, 375))+1
@@ -78,6 +90,13 @@ def validate(lkvolearner, dataset_root, epoch, vis_dir=None,
         data_pack = list(enumerate(zip(pred_depths, raw_images, error_maps, [val_vis_dir for _ in range(n)])))
         pool = Pool(20)
         pool.map(save_val_images, data_pack)
+        pool.close()
+        pool.join()
+
+        data_pack = list(enumerate(zip(pred_depths, raw_images, \
+            conv_map, upconv_map, [val_vis_dir for _ in range(n)])))
+        pool = Pool(20)
+        pool.map(save_attention_images, data_pack)
         pool.close()
         pool.join()
 
@@ -201,7 +220,7 @@ def main():
                     warp_error_10 = vis_warp_error(frame_vis_list[1], warp_img_list[1][0])
                     warp_error_11 = vis_warp_error(frame_vis_list[1], warp_img_list[1][1])
                     warp_error_2 = vis_warp_error(frame_vis_list[2], warp_img_list[2][0])
-                    
+
                     left_vis = np.vstack([frame_vis_list[0], depth_vis_list[0], \
                                             warp_img_list[0][0], zeros, \
                                             warp_error_0, zeros])

@@ -107,6 +107,8 @@ class VggDepthEstimator(nn.Module):
         self.invdepth_layers.append(Conv(16, 1, 3, 1, 1, nn.Sigmoid()))
         # self.invdepth_layers.append(InvDepth(16))
 
+        self.vis_attention = False
+
     def init_weights(self):
         def weights_init(m):
             classname = m.__class__.__name__
@@ -115,6 +117,20 @@ class VggDepthEstimator(nn.Module):
                 m.bias.data = torch.zeros(m.bias.data.size())
 
         self.apply(weights_init)
+        def extract_attention_map(self):
+        conv_map = []
+        for feat in self.conv_feats:
+            conv_map.append(torch.max(feat, 1)[0])
+        # print("conv map")
+        # for feat in conv_map:
+        #     print(feat.shape)
+        upconv_map = []
+        for feat in self.upconv_feats:
+            upconv_map.append(torch.max(feat, 1)[0])
+        # print("upconv map")
+        # for feat in upconv_map:
+        #     print(feat.shape)
+        return conv_map, upconv_map
 
     def forward(self, input):
         conv_feat = self.conv_layers[0].forward(input)
@@ -123,13 +139,13 @@ class VggDepthEstimator(nn.Module):
             conv_feat = self.conv_layers[i].forward(self.conv_feats[i-1])
             self.conv_feats.append(conv_feat)
 
-        upconv_feats = []
+        self.upconv_feats = []
         invdepth_pyramid = []
         for i in range(0, len(self.upconv_layers)):
             if i==0:
                 x = self.upconv_layers[i].forward(self.conv_feats[-1])
             else:
-                x = self.upconv_layers[i].forward(upconv_feats[i-1])
+                x = self.upconv_layers[i].forward(self.upconv_feats[i-1])
             if i<len(self.upconv_layers)-1:
                 if x.size(-1) != self.conv_feats[-2-i].size(-1):
                     x = x[:, :, :, :-1]
@@ -142,17 +158,22 @@ class VggDepthEstimator(nn.Module):
                 x = torch.cat((x, self.conv_feats[-(2+i)], nn.functional.interpolate(invdepth_pyramid[-1], scale_factor=2, mode='bilinear')), 1)
             else:
                 x = torch.cat((x, self.conv_feats[-(2+i)]), 1)
-            upconv_feats.append(self.iconv_layers[i].forward(x))
+            self.upconv_feats.append(self.iconv_layers[i].forward(x))
             if i>0:
                 # invdepth_pyramid.append(self.invdepth_layers[i-1].forward(upconv_feats[-1])*DISP_SCALING+MIN_DISP)
-                invdepth_pyramid.append(self.invdepth_layers[i-1].forward(upconv_feats[-1]))
+                invdepth_pyramid.append(self.invdepth_layers[i-1].forward(self.upconv_feats[-1]))
                 # invdepth_pyramid.append(self.invdepth_layers[i-1].forward(upconv_feats[-1]))
         invdepth_pyramid = invdepth_pyramid[-1::-1]
         invdepth_pyramid = invdepth_pyramid[0:5]
         # conv_feats_output = conv_feats_output[0:5]
         for i in range(len(invdepth_pyramid)):
             invdepth_pyramid[i] = invdepth_pyramid[i].squeeze(1)*DISP_SCALING+MIN_DISP
-        return invdepth_pyramid
+
+        if self.vis_attention:
+            conv_map, upconv_map = self.extract_attention_map()
+            return invdepth_pyramid, conv_map, upconv_map
+        else:
+            return invdepth_pyramid
         # return invdepth_pyramid, invdepth0_pyramid, normalize_convfeat_pyramid(conv_feats_output)
 
 class PoseNet(nn.Module):
