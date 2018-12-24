@@ -101,6 +101,7 @@ def validate(lkvolearner, dataset_root, epoch, vis_dir=None,
         pool.close()
         pool.join()
 
+    vgg_depth_net.vis_attention = False
     return abs_rel, sq_rel, rms, log_rms, d1_all, a1, a2, a3
 
 def main():

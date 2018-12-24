@@ -164,8 +164,8 @@ def predKITTI(model, dataset_root, test_file_list, img_size=[128, 416],
         conv_map_list.append(np.asarray(conv_map_vis))
         upconv_map_list.append(np.asarray(upconv_map_vis))
         i = i+1
-        if i>3:
-            break
+        # if i>3:
+        #     break
 
     pred_disp = np.asarray(pred_disp)
     raw_images = np.asarray(raw_images)
