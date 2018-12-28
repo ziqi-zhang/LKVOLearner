@@ -405,7 +405,7 @@ class DirectVO(nn.Module):
         xyz = R_batch[:, :, 0:2].bmm(xy)\
             + R_batch[:, :, 2:3].expand(batch_size, 3, N)\
             + t_batch.contiguous().view(batch_size, 3, 1).expand(batch_size, 3, N)\
-                * batch_inv_depth
+                / batch_inv_depth
 
         z = xyz[:, 2:3, :].clamp(min=1e-10)
         xy_warp = xyz[:, 0:2, :] / z.expand(batch_size, 2, N)
@@ -434,12 +434,9 @@ class DirectVO(nn.Module):
         # xyz = R_batch.bmm(torch.cat((xy.view(1, 2, N).expand(batch_size, 2, N), Variable(self.load_to_device(torch.ones(batch_size, 1, N)))), 1)) \
         #     + t_batch.view(batch_size, 3, 1).expand(batch_size, 3, N) * inv_depth.view(1, 1, N).expand(batch_size, 3, N)
         batch_inv_depth = inv_depth.contiguous().view(batch_size, 1, N).expand(batch_size, 3, N)
-        xyz = R_batch[:, :, 0:2].bmm(xy)
-        xyz += R_batch[:, :, 2:3].expand(batch_size, 3, N)
-        xyz += t_batch.contiguous().view(batch_size, 3, 1).expand(batch_size, 3, N) * batch_inv_depth
         xyz = R_batch[:, :, 0:2].bmm(xy)\
             + R_batch[:, :, 2:3].expand(batch_size, 3, N)\
-            + t_batch.contiguous().view(batch_size, 3, 1).expand(batch_size, 3, N) * batch_inv_depth
+            + t_batch.contiguous().view(batch_size, 3, 1).expand(batch_size, 3, N) / batch_inv_depth
         z = xyz[:, 2:3, :].clamp(min=1e-10)
         xy_warp = xyz[:, 0:2, :] / z.expand(batch_size, 2, N)
         # u_warp = ((xy_warp[:, 0, :]*self.camparams['fx'] + self.camparams['cx'])/2**level_idx - .5).view(batch_size, N)
