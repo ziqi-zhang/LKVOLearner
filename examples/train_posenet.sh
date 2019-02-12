@@ -1,4 +1,3 @@
-source activate r0.1.0
 
 PWD=$(pwd)
 mkdir $PWD/checkpoints/
