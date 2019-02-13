@@ -6,7 +6,7 @@ TOTAL_BS=`echo "$GPU*$BS"|bc`
 PWD=$(pwd)
 mkdir -p $PWD/checkpoints/
 # EXPNAME=linklink_$TOTAL_BS
-EXPNAME=norm_baseline
+EXPNAME=check_baseline_2.12
 CHECKPOINT_DIR=$PWD/checkpoints/$EXPNAME
 mkdir -p $CHECKPOINT_DIR
 
